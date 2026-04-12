@@ -1,0 +1,83 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#__nuxt {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--ui-bg);
+}
+
+.page-bloom {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: clip;
+  pointer-events: none;
+}
+
+.page-bloom__wash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background:
+    radial-gradient(120% 40% at 50% 0%, rgb(74 222 128 / 0.14) 0%, rgb(34 197 94 / 0.08) 26%, transparent 62%),
+    linear-gradient(180deg, rgb(74 222 128 / 0.03) 0%, transparent 28%);
+  animation: page-bloom-enter 0.9s ease-out forwards;
+}
+
+@keyframes page-bloom-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-0.75rem);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-bloom__wash {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+a {
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.json-block {
+  margin: 0;
+  overflow: auto;
+  border-radius: 1rem;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-bg-muted);
+  padding: 1rem;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 0.75rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
