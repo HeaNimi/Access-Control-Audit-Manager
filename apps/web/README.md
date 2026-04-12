@@ -1,75 +1,37 @@
-# Nuxt Minimal Starter
+# Web
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+Nuxt frontend for the Access Control Audit Manager prototype.
+
+## What it does
+
+- lets users create and review requests
+- shows approvals, execution results, and timelines
+- shows audit history and observed events
+- exposes runtime settings and log views for administration
 
 ## Setup
 
-Make sure to install dependencies:
+Use the root project setup in `README.md`. The web app uses the root `.env` for public runtime values.
+
+If you want to run only the web app:
 
 ```bash
-# npm
 npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+npm run dev:web
 ```
 
-## Development Server
+The UI starts on `http://localhost:3000` and expects the API at `http://localhost:3001` unless you change `NUXT_PUBLIC_API_BASE_URL`.
 
-Start the development server on `http://localhost:3000`:
+## Useful commands
 
 ```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
+npm run dev --workspace web
+npm run build --workspace web
+npm run preview --workspace web
 ```
 
-## Production
+## Notes
 
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+- The UI depends on the API for all real data.
+- Default form hints such as UPN suffix and mail domain come from the root `.env`.
+- For full local development, start both apps with `npm run dev` from the repository root.

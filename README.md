@@ -1,50 +1,65 @@
 # ACAM-TS
 
-Thesis prototype for Active Directory change management and audit correlation.
+Access Control Audit Manager thesis prototype.
 
-## Stack
+This repository contains:
+- `apps/api` - NestJS API for authentication, request workflow, execution, audit logging, SIEM ingest, and event correlation
+- `apps/web` - Nuxt UI for requests, audit, observed events, logs, and settings
+- `packages/contracts` - shared TypeScript contracts
 
-- `apps/web`: Nuxt 4 internal admin UI
-- `apps/api`: NestJS workflow and integration API
-- `packages/contracts`: shared TypeScript contracts
+## Requirements
 
-## What the MVP includes
+- Node.js 24+
+- npm 11+
+- Docker
 
-- real AD login using Windows `sAMAccountName`
-- config-based AD group mapping to application roles
-- local_admin login for recovery when AD auth is unavailable
-- create, list, inspect, approve, and reject AD change requests
-- automatic execution after approval through an `ldapts`-backed directory executor
-- internal append-only audit logging
-- observed AD or SIEM event ingestion
-- deterministic request-to-event correlation and a unified request timeline
-
-## Local setup
+## Quick start
 
 1. Copy `.env.example` to `.env`.
-2. Start PostgreSQL with `npm run db:up`.
-3. Run migrations with `npm run db:migrate` or let the API run them on startup.
-4. Start the API and UI with `npm run dev`.
+2. Update the LDAP, local admin, and SIEM values in `.env` for your environment.
+3. Install dependencies:
 
-## Authentication
+```bash
+npm install
+```
 
-- Sign in with your Windows `sAMAccountName` and password.
-- The application syncs the AD user into `system_user` on successful login.
-- `requester` is implicit for every authenticated AD user.
-- `approver`, `auditor`, and `administrator` are resolved from AD groups configured through:
-  - `AUTH_ROLE_MAP_APPROVER_GROUP_DNS`
-  - `AUTH_ROLE_MAP_AUDITOR_GROUP_DNS`
-  - `AUTH_ROLE_MAP_ADMINISTRATOR_GROUP_DNS`
-- A local_admin account is also available through:
-  - `AUTH_LOCAL_ADMIN_USERNAME`
-  - `AUTH_LOCAL_ADMIN_PASSWORD`
+4. Start PostgreSQL:
+
+```bash
+npm run db:up
+```
+
+5. Run the database migration:
+
+```bash
+npm run db:migrate
+```
+
+6. Start the API and web app:
+
+```bash
+npm run dev
+```
+
+## Local URLs
+
+- Web: `http://localhost:3000`
+- API: `http://localhost:3001`
+
+## Useful commands
+
+```bash
+npm run dev
+npm run dev:api
+npm run dev:web
+npm run build
+npm run test
+npm run db:down
+```
 
 ## Notes
 
-- `DIRECTORY_EXECUTION_MODE=ldap` is the intended demo runtime and uses the configured AD service account for both lookup and execution.
-- `AUTH_ENABLE_LDAP_LOGIN` and `AUTH_ENABLE_LOCAL_ADMIN_LOGIN` control the AD and local_admin login paths.
-- If `LDAP_BIND_PASSWORD` is missing or invalid, AD lookup, execution, and the Settings health check will fail explicitly instead of silently falling back.
-- Group membership changes are executed by modifying the AD group `member` attribute, not `memberOf`.
-- `.env.example` is sanitized for publication and uses placeholder directory values under `example.local`.
-- Replace the LDAP host, bind DN, OU, group DNs, and ingest key in `.env` before connecting the prototype to a real environment.
-- `LDAP_UPN_SUFFIX` lets the backend derive `userPrincipalName` values like `new.user@example.local` when the form leaves UPN blank.
+- `.env.example` is sanitized and uses placeholder values under `example.local`.
+- PostgreSQL runs from `infra/docker/docker-compose.yml` on `localhost:5432`.
+- `SIEM_PULL_ENABLED=false` by default, so observed events are not polled until you enable and configure the SIEM settings.
+- `DIRECTORY_EXECUTION_MODE=ldap` expects a real LDAP/Active Directory environment. Without valid LDAP settings, login, directory reads, and request execution will fail.
