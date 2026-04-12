@@ -87,4 +87,4 @@ npm run db:down
 - `npm run docker:up` builds a single application container that runs both the API and the web server.
 - The combined container runs database migrations on startup by default.
 - `SIEM_PULL_ENABLED=false` by default, so observed events are not polled until you enable and configure the SIEM settings.
-- `DIRECTORY_EXECUTION_MODE=ldap` expects a real LDAP/Active Directory environment. Without valid LDAP settings, login, directory reads, and request execution will fail.
+- The application expects a real LDAP/Active Directory environment. Without valid LDAP settings, login, directory reads, and request execution will fail.

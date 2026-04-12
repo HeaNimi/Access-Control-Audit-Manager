@@ -309,18 +309,6 @@ export class DirectoryReaderService {
   }
 
   async getConnectionHealth(): Promise<RuntimeHealthCheck> {
-    const mode = this.sessionService.getDirectoryMode();
-
-    if (mode !== 'ldap') {
-      return {
-        key: 'directory',
-        label: 'Active Directory',
-        status: 'warning',
-        detail:
-          'DIRECTORY_EXECUTION_MODE is not set to ldap, so live Active Directory access is disabled.',
-      };
-    }
-
     try {
       const { client, config } = await this.sessionService.createBoundClient();
 

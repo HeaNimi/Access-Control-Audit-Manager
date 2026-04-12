@@ -160,7 +160,6 @@ export class SettingsService {
         key: 'directory',
         label: 'Directory',
         entries: [
-          this.entry('DIRECTORY_EXECUTION_MODE', 'ldap'),
           this.entry('DIRECTORY_EXECUTION_SERVICE_ACCOUNT'),
           this.entry('LDAP_URL'),
           this.entry('LDAP_BIND_DN'),

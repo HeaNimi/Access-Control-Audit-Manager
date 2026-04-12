@@ -55,6 +55,21 @@ export class AppLogService extends ConsoleLogger implements LoggerService {
     this.writeEntry('log', message, source, meta);
   }
 
+  captureException(
+    source: string,
+    error: unknown,
+    meta?: Record<string, unknown>,
+  ): void {
+    const message = this.formatLogMessage(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+
+    super.error(message, stack, source);
+    this.writeEntry('error', message, source, {
+      ...meta,
+      ...(stack ? { stack } : {}),
+    });
+  }
+
   getLogPath(): string {
     return this.logPath;
   }
@@ -160,6 +175,15 @@ export class AppLogService extends ConsoleLogger implements LoggerService {
 
     if (message instanceof Error) {
       return message.message;
+    }
+
+    if (
+      message &&
+      typeof message === 'object' &&
+      'message' in message &&
+      typeof (message as { message?: unknown }).message === 'string'
+    ) {
+      return (message as { message: string }).message;
     }
 
     try {

@@ -20,12 +20,8 @@ describe('Directory reader/writer internals', () => {
       createClient: jest.fn(),
       applyStartTlsIfConfigured: jest.fn(),
       withBoundClient: jest.fn(),
-      getDirectoryMode: jest.fn().mockReturnValue('ldap'),
       getRequiredLdapConfig: jest.fn(),
       isPasswordWriteConnectionProtected: jest.fn().mockReturnValue(true),
-      getDefaultUsersOuDn: jest
-        .fn()
-        .mockReturnValue('OU=Users,DC=example,DC=local'),
     } as unknown as jest.Mocked<DirectorySessionService>;
   }
 

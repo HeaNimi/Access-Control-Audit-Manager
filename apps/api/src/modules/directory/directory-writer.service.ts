@@ -4,7 +4,6 @@ import { Injectable } from '@nestjs/common';
 import type {
   AccountChangePayload,
   AccountUpdatePayload,
-  ChangeRequestPayload,
   DirectoryExecutionContext,
   DirectoryExecutionResult,
   GroupChangePayload,
@@ -21,7 +20,6 @@ import type {
 import { LdapStepError } from './directory.types';
 import {
   encodeUnicodePassword,
-  getFailureIdentifier,
   getRawErrorMessage,
   getUserAccountControlValue,
   isRetryableLdapSocketError,
@@ -39,127 +37,7 @@ export class DirectoryWriterService {
   async execute(
     context: DirectoryExecutionContext,
   ): Promise<DirectoryExecutionResult> {
-    const mode = this.sessionService.getDirectoryMode();
-
-    if (mode === 'ldap') {
-      return this.executeWithLdap(context);
-    }
-
-    return this.executeInMockMode(context.payload);
-  }
-
-  private executeInMockMode(
-    payload: ChangeRequestPayload,
-  ): DirectoryExecutionResult {
-    const identifier = getFailureIdentifier(payload);
-    const defaultUsersOuDn = this.sessionService.getDefaultUsersOuDn();
-
-    if (identifier?.startsWith('fail')) {
-      return {
-        success: false,
-        message: `Mock directory executor rejected identifier ${identifier}.`,
-        raw: {
-          mode: 'mock',
-          reason: 'simulated_failure',
-        },
-      };
-    }
-
-    switch (payload.kind) {
-      case 'user_create':
-        return {
-          success: true,
-          message: `Created mock user ${payload.target.samAccountName}.`,
-          changedDn:
-            payload.target.distinguishedName ??
-            `CN=${payload.target.displayName},${payload.target.ouDistinguishedName ?? defaultUsersOuDn}`,
-          changedAttributes: ['cn', 'sAMAccountName', 'displayName'],
-          raw: {
-            mode: 'mock',
-            operation: 'add-user',
-          },
-        };
-      case 'account_change': {
-        const attributeChanges =
-          payload.changes?.map((change) => change.attribute) ?? [];
-        const groupOperations =
-          payload.groupChanges?.map((change) => ({
-            operation: change.operation,
-            group:
-              change.group.samAccountName ??
-              change.group.displayName ??
-              change.group.distinguishedName ??
-              'group',
-          })) ?? [];
-
-        return {
-          success: true,
-          message: `Updated ${payload.target.samAccountName} with ${attributeChanges.length} attribute change(s) and ${groupOperations.length} group change(s) in mock directory.`,
-          changedDn: payload.target.distinguishedName,
-          changedAttributes: [
-            ...attributeChanges,
-            ...(groupOperations.length > 0 ? ['member'] : []),
-          ],
-          raw: {
-            mode: 'mock',
-            operation: 'account-change',
-            groupOperations,
-          },
-        };
-      }
-      case 'group_change': {
-        const memberOperations =
-          payload.memberChanges?.map((change) => ({
-            operation: change.operation,
-            member: change.member.samAccountName,
-          })) ?? [];
-
-        return {
-          success: true,
-          message: `Updated LDAP group ${payload.target.samAccountName} with ${memberOperations.length} member change(s) in mock directory.`,
-          changedDn: payload.target.distinguishedName,
-          changedAttributes: memberOperations.length > 0 ? ['member'] : [],
-          raw: {
-            mode: 'mock',
-            operation: 'group-change',
-            memberOperations,
-          },
-        };
-      }
-      case 'account_update':
-        return {
-          success: true,
-          message: `Updated ${payload.target.samAccountName} in mock directory.`,
-          changedDn: payload.target.distinguishedName,
-          changedAttributes: payload.changes.map((change) => change.attribute),
-          raw: {
-            mode: 'mock',
-            operation: 'modify-user',
-          },
-        };
-      case 'group_membership_add':
-        return {
-          success: true,
-          message: `Added ${payload.member.samAccountName} to ${payload.group.samAccountName ?? payload.group.displayName ?? 'group'}.`,
-          changedDn: payload.group.distinguishedName,
-          changedAttributes: ['member'],
-          raw: {
-            mode: 'mock',
-            operation: 'group-member-add',
-          },
-        };
-      case 'group_membership_remove':
-        return {
-          success: true,
-          message: `Removed ${payload.member.samAccountName} from ${payload.group.samAccountName ?? payload.group.displayName ?? 'group'}.`,
-          changedDn: payload.group.distinguishedName,
-          changedAttributes: ['member'],
-          raw: {
-            mode: 'mock',
-            operation: 'group-member-remove',
-          },
-        };
-    }
+    return this.executeWithLdap(context);
   }
 
   private async executeWithLdap(

@@ -10,19 +10,7 @@ import type { LdapConnectionConfig } from './directory.types';
 export class DirectorySessionService {
   constructor(private readonly configService: ConfigService) {}
 
-  getDirectoryMode(): string {
-    return (
-      this.configService.get<string>('DIRECTORY_EXECUTION_MODE') ?? 'mock'
-    ).toLowerCase();
-  }
-
   getRequiredLdapConfig(): LdapConnectionConfig {
-    if (this.getDirectoryMode() !== 'ldap') {
-      throw new InternalServerErrorException(
-        'Active Directory access requires DIRECTORY_EXECUTION_MODE=ldap.',
-      );
-    }
-
     const url = this.configService.get<string>('LDAP_URL');
     const bindDn = this.configService.get<string>('LDAP_BIND_DN');
     const bindPassword = this.configService.get<string>('LDAP_BIND_PASSWORD');
@@ -122,13 +110,5 @@ export class DirectorySessionService {
     } finally {
       await client.unbind().catch(() => undefined);
     }
-  }
-
-  getDefaultUsersOuDn(): string {
-    return (
-      this.configService.get<string>('LDAP_USERS_OU_DN') ??
-      this.configService.get<string>('LDAP_BASE_DN') ??
-      'OU=Users,DC=example,DC=local'
-    );
   }
 }
