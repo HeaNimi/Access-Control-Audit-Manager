@@ -1,0 +1,13 @@
+.git
+.codex
+local-docs
+node_modules
+runtime
+test-results
+.env
+apps/api/dist
+apps/api/runtime
+apps/web/.nuxt
+apps/web/.output
+packages/contracts/dist
+npm-debug.log*

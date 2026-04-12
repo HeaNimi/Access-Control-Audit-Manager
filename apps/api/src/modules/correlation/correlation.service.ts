@@ -287,7 +287,7 @@ export class CorrelationService {
     execution?: RequestExecutionRow,
   ): Promise<ObservedEventRow[]> {
     const windowSeconds = Number(
-      process.env.CORRELATION_WINDOW_SECONDS ?? '900',
+      process.env.CORRELATION_WINDOW_SECONDS ?? '60',
     );
     const lowerBound = new Date(
       (
@@ -382,7 +382,7 @@ export class CorrelationService {
     execution?: RequestExecutionRow,
   ): boolean {
     const windowSeconds = Number(
-      process.env.CORRELATION_WINDOW_SECONDS ?? '900',
+      process.env.CORRELATION_WINDOW_SECONDS ?? '60',
     );
     const lowerBound = new Date(
       (

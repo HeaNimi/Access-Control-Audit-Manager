@@ -175,7 +175,7 @@ export class SettingsService {
       {
         key: 'correlation',
         label: 'Correlation',
-        entries: [this.entry('CORRELATION_WINDOW_SECONDS', '900')],
+        entries: [this.entry('CORRELATION_WINDOW_SECONDS', '60')],
       },
       this.siemService.getConfigSection(),
       {

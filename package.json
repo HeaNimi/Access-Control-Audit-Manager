@@ -12,11 +12,14 @@
     "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run start:dev --workspace api",
     "dev:web": "npm run dev --workspace web",
+    "docker:build": "docker build -f infra/docker/Dockerfile -t acam-ts:local .",
+    "docker:up": "docker compose -f infra/docker/docker-compose.yml up --build -d",
+    "docker:down": "docker compose -f infra/docker/docker-compose.yml down",
     "lint": "npm run lint --workspace api",
     "db:migrate": "npm run build --workspace api && npm run migrate --workspace api",
     "db:setup": "npm run db:migrate",
-    "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
-    "db:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "db:up": "docker compose -f infra/docker/docker-compose.yml up -d postgres",
+    "db:down": "docker compose -f infra/docker/docker-compose.yml stop postgres",
     "test": "npm run test --workspace api"
   },
   "engines": {

@@ -41,6 +41,26 @@ npm run db:migrate
 npm run dev
 ```
 
+## Docker build
+
+Build the combined production image:
+
+```bash
+npm run docker:build
+```
+
+Start PostgreSQL and the combined app container:
+
+```bash
+npm run docker:up
+```
+
+Stop the Docker stack:
+
+```bash
+npm run docker:down
+```
+
 ## Local URLs
 
 - Web: `http://localhost:3000`
@@ -54,6 +74,9 @@ npm run dev:api
 npm run dev:web
 npm run build
 npm run test
+npm run docker:build
+npm run docker:up
+npm run docker:down
 npm run db:down
 ```
 
@@ -61,5 +84,7 @@ npm run db:down
 
 - `.env.example` is sanitized and uses placeholder values under `example.local`.
 - PostgreSQL runs from `infra/docker/docker-compose.yml` on `localhost:5432`.
+- `npm run docker:up` builds a single application container that runs both the API and the web server.
+- The combined container runs database migrations on startup by default.
 - `SIEM_PULL_ENABLED=false` by default, so observed events are not polled until you enable and configure the SIEM settings.
 - `DIRECTORY_EXECUTION_MODE=ldap` expects a real LDAP/Active Directory environment. Without valid LDAP settings, login, directory reads, and request execution will fail.
