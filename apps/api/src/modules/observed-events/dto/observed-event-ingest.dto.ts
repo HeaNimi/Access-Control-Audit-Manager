@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsISO8601,
   IsInt,
+  IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
@@ -15,9 +16,9 @@ export class ObservedEventIngestDto {
   @IsString()
   sourceSystem!: string;
 
-  @IsOptional()
   @IsString()
-  sourceReference?: string | null;
+  @IsNotEmpty()
+  sourceReference!: string;
 
   @IsOptional()
   @Type(() => Number)

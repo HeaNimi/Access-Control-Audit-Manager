@@ -1,15 +1,16 @@
+import { timingSafeEqual } from 'node:crypto';
+
 import {
   Body,
   Controller,
   ForbiddenException,
   Get,
   Headers,
+  InternalServerErrorException,
   Post,
   Query,
-  Req,
   UseGuards,
 } from '@nestjs/common';
-import type { Request } from 'express';
 
 import { AuthGuard } from '../../common/auth/auth.guard';
 import { Roles } from '../../common/auth/roles.decorator';
@@ -45,17 +46,19 @@ export class ObservedEventsController {
   async ingest(
     @Body() dto: ObservedEventIngestDto,
     @Headers('x-ingest-key') ingestKey: string | undefined,
-    @Req() request: Request,
   ) {
     const expectedKey =
       process.env.OBSERVED_EVENT_INGEST_KEY ?? 'change-me-ingest-key';
-    const isPrivilegedUser = request.user?.roles.some((role) =>
-      ['administrator', 'auditor', 'approver'].includes(role),
-    );
 
-    if (ingestKey !== expectedKey && !isPrivilegedUser) {
+    if (!expectedKey || expectedKey === 'change-me-ingest-key') {
+      throw new InternalServerErrorException(
+        'Observed event ingest is not configured.',
+      );
+    }
+
+    if (!this.matchesIngestKey(ingestKey, expectedKey)) {
       throw new ForbiddenException(
-        'Provide a valid ingest key or sign in with a privileged role.',
+        'Provide a valid ingest key.',
       );
     }
 
@@ -76,5 +79,23 @@ export class ObservedEventsController {
       Number.isFinite(parsedPage) ? parsedPage : 1,
       Number.isFinite(parsedPageSize) ? parsedPageSize : 50,
     );
+  }
+
+  private matchesIngestKey(
+    providedKey: string | undefined,
+    expectedKey: string,
+  ): boolean {
+    if (!providedKey) {
+      return false;
+    }
+
+    const provided = Buffer.from(providedKey, 'utf8');
+    const expected = Buffer.from(expectedKey, 'utf8');
+
+    if (provided.length !== expected.length) {
+      return false;
+    }
+
+    return timingSafeEqual(provided, expected);
   }
 }

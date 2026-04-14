@@ -27,7 +27,7 @@ export class ObservedEventsService {
     let observedEventId: number;
     const eventSource = sanitizePostgresText(dto.eventSource);
     const sourceSystem = sanitizePostgresText(dto.sourceSystem);
-    const sourceReference = sanitizePostgresNullableText(dto.sourceReference);
+    const sourceReference = sanitizePostgresText(dto.sourceReference);
 
     try {
       const inserted = await this.db
@@ -61,11 +61,7 @@ export class ObservedEventsService {
         .select('observed_event_id')
         .where('event_source', '=', eventSource)
         .where('source_system', '=', sourceSystem)
-        .where(
-          'source_reference',
-          sourceReference ? '=' : 'is',
-          sourceReference,
-        )
+        .where('source_reference', '=', sourceReference)
         .executeTakeFirstOrThrow();
 
       observedEventId = existing.observed_event_id;
@@ -78,7 +74,7 @@ export class ObservedEventsService {
         observedEventId,
         eventSource: dto.eventSource,
         sourceSystem: dto.sourceSystem,
-        sourceReference: dto.sourceReference ?? null,
+        sourceReference: dto.sourceReference,
       },
     );
 

@@ -30,10 +30,16 @@ const canApprove = computed(() => {
     return false;
   }
 
+  const isAdministrator = user.value.roles.includes("administrator");
+  const isAssignedApprover = detail.value.approvals.some(
+    (approval) =>
+      approval.approverUserId === user.value?.userId &&
+      approval.decision === null,
+  );
+
   return (
     detail.value.status === "submitted" &&
-    (user.value.roles.includes("approver") ||
-      user.value.roles.includes("administrator"))
+    (isAdministrator || isAssignedApprover)
   );
 });
 

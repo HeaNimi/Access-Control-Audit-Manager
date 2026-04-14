@@ -4,7 +4,7 @@ import type { PaginatedEntriesView } from "./pagination";
 export interface ObservedEventIngestDto {
   eventSource: string;
   sourceSystem: string;
-  sourceReference?: string | null;
+  sourceReference: string;
   eventId?: number | null;
   eventTime: string;
   eventType?: string | null;
