@@ -65,7 +65,6 @@ export function stateBadge(
         variant: "subtle",
       };
     case "missing":
-    case "ambiguous":
     case "pending":
     case "submitted":
     case "executing":

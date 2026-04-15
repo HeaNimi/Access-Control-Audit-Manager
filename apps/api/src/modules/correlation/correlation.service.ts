@@ -59,22 +59,6 @@ export class CorrelationService {
           'Matched by request workflow',
         );
       }
-
-      if (matchingRequests.length > 1) {
-        await this.auditService.write({
-          requestId,
-          actorRole: 'system',
-          eventType: 'correlation_ambiguous',
-          entityType: 'observed_event',
-          entityId: String(event.observed_event_id),
-          message:
-            'Observed event matched multiple requests and was left uncorrelated.',
-          eventDetails: {
-            observedEventId: event.observed_event_id,
-            candidateRequestIds: matchingRequests,
-          },
-        });
-      }
     }
   }
 
@@ -97,22 +81,6 @@ export class CorrelationService {
         observedEventId,
         'Matched on event ingest',
       );
-      return;
-    }
-
-    if (matches.length > 1) {
-      await this.auditService.write({
-        actorRole: 'system',
-        eventType: 'correlation_ambiguous',
-        entityType: 'observed_event',
-        entityId: String(observedEventId),
-        message:
-          'Observed event matched multiple requests and needs manual review.',
-        eventDetails: {
-          observedEventId,
-          candidateRequestIds: matches,
-        },
-      });
     }
   }
 
@@ -192,17 +160,6 @@ export class CorrelationService {
       return 'matched';
     }
 
-    const ambiguous = await this.db
-      .selectFrom('audit_log')
-      .select('audit_log_id')
-      .where('request_id', '=', requestId)
-      .where('event_type', '=', 'correlation_ambiguous')
-      .executeTakeFirst();
-
-    if (ambiguous) {
-      return 'ambiguous';
-    }
-
     if (status === 'executed' || status === 'failed') {
       return 'missing';
     }
@@ -221,18 +178,6 @@ export class CorrelationService {
 
     if (matched) {
       return 'matched';
-    }
-
-    const ambiguous = await this.db
-      .selectFrom('audit_log')
-      .select('audit_log_id')
-      .where('event_type', '=', 'correlation_ambiguous')
-      .where('entity_type', '=', 'observed_event')
-      .where('entity_id', '=', String(observedEventId))
-      .executeTakeFirst();
-
-    if (ambiguous) {
-      return 'ambiguous';
     }
 
     return 'out_of_band';

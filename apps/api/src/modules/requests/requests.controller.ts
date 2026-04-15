@@ -15,8 +15,8 @@ export class RequestsController {
   constructor(private readonly requestsService: RequestsService) {}
 
   @Get()
-  async list() {
-    return this.requestsService.list();
+  async list(@CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.list(user);
   }
 
   @Post()
@@ -28,8 +28,11 @@ export class RequestsController {
   }
 
   @Get(':requestId')
-  async getDetail(@Param('requestId') requestId: string) {
-    return this.requestsService.getDetail(requestId);
+  async getDetail(
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.requestsService.getDetail(requestId, user);
   }
 
   @Post(':requestId/decision')
@@ -52,7 +55,10 @@ export class RequestsController {
   }
 
   @Get(':requestId/timeline')
-  async timeline(@Param('requestId') requestId: string) {
-    return this.requestsService.getTimeline(requestId);
+  async timeline(
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.requestsService.getTimeline(requestId, user);
   }
 }

@@ -45,6 +45,8 @@ export function useApi<T>(
           ? error.message
           : "API request failed.";
 
-    throw new Error(message);
+    throw Object.assign(new Error(message), {
+      statusCode,
+    });
   });
 }

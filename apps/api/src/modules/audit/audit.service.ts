@@ -399,17 +399,6 @@ export class AuditService {
       return 'matched';
     }
 
-    const ambiguous = await this.db
-      .selectFrom('audit_log')
-      .select('audit_log_id')
-      .where('request_id', '=', requestId)
-      .where('event_type', '=', 'correlation_ambiguous')
-      .executeTakeFirst();
-
-    if (ambiguous) {
-      return 'ambiguous';
-    }
-
     if (status === 'executed' || status === 'failed') {
       return 'missing';
     }
@@ -428,18 +417,6 @@ export class AuditService {
 
     if (matched) {
       return 'matched';
-    }
-
-    const ambiguous = await this.db
-      .selectFrom('audit_log')
-      .select('audit_log_id')
-      .where('event_type', '=', 'correlation_ambiguous')
-      .where('entity_type', '=', 'observed_event')
-      .where('entity_id', '=', String(observedEventId))
-      .executeTakeFirst();
-
-    if (ambiguous) {
-      return 'ambiguous';
     }
 
     return 'out_of_band';

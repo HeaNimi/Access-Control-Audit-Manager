@@ -9,6 +9,10 @@ import type {
 import { toErrorMessage } from "../../utils/errors";
 import { requestTypeLabel } from "../../utils/request-helpers";
 
+interface ApiStatusError {
+  statusCode?: number;
+}
+
 definePageMeta({
   middleware: "auth",
 });
@@ -58,6 +62,8 @@ const canRetryExecution = computed(() => {
 async function loadRequest() {
   loading.value = true;
   error.value = null;
+  detail.value = null;
+  timeline.value = [];
 
   try {
     const requestId = route.params.id as string;
@@ -66,6 +72,10 @@ async function loadRequest() {
       `/requests/${requestId}/timeline`,
     );
   } catch (caught) {
+    if ((caught as ApiStatusError | null)?.statusCode === 404) {
+      return;
+    }
+
     error.value = toErrorMessage(caught, "Failed to load request details.");
   } finally {
     loading.value = false;
@@ -151,7 +161,7 @@ onMounted(loadRequest);
         :error="error"
         :empty="!loading && !error && !detail"
         loading-description="Loading request detail…"
-        empty-description="Request details are unavailable right now."
+        empty-description="The request is unavailable or you do not have access to it."
         empty-color="warning"
       >
         <template v-if="detail">

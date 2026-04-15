@@ -280,7 +280,7 @@ onMounted(loadEvents);
     <UPageBody>
       <PaginatedDataTableCard
         title="Observed events"
-        description="Review matched, missing, ambiguous, and out-of-band AD or SIEM events in ingestion order so late or skewed source clocks do not hide fresh evidence."
+        description="Review matched and out-of-band AD or SIEM events in ingestion order so late or skewed source clocks do not hide fresh evidence."
         variant="subtle"
         :page="events?.page || currentPage"
         :total="events?.totalEntries || 0"

@@ -34,7 +34,6 @@ export const CORRELATION_STATES = [
   "matched",
   "rejected",
   "missing",
-  "ambiguous",
   "out_of_band",
 ] as const;
 export type CorrelationState = (typeof CORRELATION_STATES)[number];

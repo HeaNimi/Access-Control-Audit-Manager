@@ -124,13 +124,11 @@ export class RequestsService {
       },
     });
 
-    return this.getDetail(request.request_id);
+    return this.getDetail(request.request_id, actor);
   }
 
-  async list(): Promise<ChangeRequestSummary[]> {
-    const rows = await this.db
-      .selectFrom('change_request')
-      .selectAll()
+  async list(actor: AuthenticatedUser): Promise<ChangeRequestSummary[]> {
+    const rows = await this.buildVisibleRequestQuery(actor)
       .orderBy('submitted_at', 'desc')
       .execute();
 
@@ -143,8 +141,11 @@ export class RequestsService {
     return summaries;
   }
 
-  async getDetail(requestId: string): Promise<ChangeRequestDetail> {
-    const request = await this.getRequestByIdOrThrow(requestId);
+  async getDetail(
+    requestId: string,
+    actor: AuthenticatedUser,
+  ): Promise<ChangeRequestDetail> {
+    const request = await this.getVisibleRequestByIdOrThrow(requestId, actor);
     const summary = await this.toSummary(request);
     const requester = await this.getUserByIdOrThrow(request.requester_user_id);
     const payload = sanitizeRequestPayloadForResponse(
@@ -179,6 +180,7 @@ export class RequestsService {
     dto: ApprovalDecisionDto,
     actor: AuthenticatedUser,
   ): Promise<ChangeRequestDetail> {
+    await this.getVisibleRequestByIdOrThrow(requestId, actor);
     const approval = await this.loadPrimaryApproval(requestId);
 
     if (!approval) {
@@ -228,14 +230,14 @@ export class RequestsService {
       await this.executeApprovedRequest(requestId);
     }
 
-    return this.getDetail(requestId);
+    return this.getDetail(requestId, actor);
   }
 
   async retryExecution(
     requestId: string,
     actor: AuthenticatedUser,
   ): Promise<ChangeRequestDetail> {
-    const request = await this.getRequestByIdOrThrow(requestId);
+    const request = await this.getVisibleRequestByIdOrThrow(requestId, actor);
 
     if (request.status !== 'failed') {
       throw new BadRequestException(
@@ -272,11 +274,14 @@ export class RequestsService {
 
     await this.executeApprovedRequest(requestId);
 
-    return this.getDetail(requestId);
+    return this.getDetail(requestId, actor);
   }
 
-  async getTimeline(requestId: string): Promise<RequestTimelineItem[]> {
-    const detail = await this.getDetail(requestId);
+  async getTimeline(
+    requestId: string,
+    actor: AuthenticatedUser,
+  ): Promise<RequestTimelineItem[]> {
+    const detail = await this.getDetail(requestId, actor);
     return this.readModelService.buildRequestTimeline({
       request: {
         requestId: detail.requestId,
@@ -359,6 +364,52 @@ export class RequestsService {
     const request = await this.db
       .selectFrom('change_request')
       .selectAll()
+      .where('request_id', '=', requestId)
+      .executeTakeFirst();
+
+    if (!request) {
+      throw new NotFoundException('Change request not found.');
+    }
+
+    return request;
+  }
+
+  private buildVisibleRequestQuery(actor: AuthenticatedUser) {
+    const query = this.db.selectFrom('change_request').selectAll();
+
+    if (this.hasGlobalRequestVisibility(actor)) {
+      return query;
+    }
+
+    return query.where((eb) =>
+      eb.or([
+        eb('change_request.requester_user_id', '=', actor.userId),
+        eb.exists(
+          eb
+            .selectFrom('request_approval')
+            .select('request_approval.request_id')
+            .whereRef(
+              'request_approval.request_id',
+              '=',
+              'change_request.request_id',
+            )
+            .where('request_approval.approver_user_id', '=', actor.userId),
+        ),
+      ]),
+    );
+  }
+
+  private hasGlobalRequestVisibility(actor: AuthenticatedUser): boolean {
+    return (
+      actor.roles.includes('administrator') || actor.roles.includes('auditor')
+    );
+  }
+
+  private async getVisibleRequestByIdOrThrow(
+    requestId: string,
+    actor: AuthenticatedUser,
+  ): Promise<ChangeRequestRow> {
+    const request = await this.buildVisibleRequestQuery(actor)
       .where('request_id', '=', requestId)
       .executeTakeFirst();
 
