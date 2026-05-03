@@ -12,6 +12,7 @@ import type {
 import {
   collectMatchedCorrelationSignals,
   doesObservedEventMatchRequest,
+  evaluateObservedEventForRequest,
   getCorrelationSignalForEvent,
   getCorrelationSignalsForEvent,
   getExpectedCorrelationSignals,
@@ -448,5 +449,178 @@ describe('correlation-signals.utils', () => {
     expect(doesObservedEventMatchRequest(observed, request, payload)).toBe(
       true,
     );
+  });
+
+  it('diagnoses matched account attribute events', () => {
+    const payload: AccountChangePayload = {
+      kind: 'account_change',
+      target: {
+        samAccountName: 'helper.james',
+        objectSid: baseRequest.target_object_sid,
+      },
+      changes: [
+        {
+          attribute: 'description',
+          previousValue: 'old',
+          nextValue: 'new',
+        },
+      ],
+    };
+    const observed = event(
+      {
+        event_id: 5136,
+        event_type: 'account_update',
+        distinguished_name:
+          'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+      },
+      {
+        ObjectDN:
+          'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+        TargetSid: baseRequest.target_object_sid,
+        AttributeLDAPDisplayName: 'description',
+        AttributeValue: 'new',
+      },
+    );
+
+    expect(
+      evaluateObservedEventForRequest(observed, baseRequest, payload),
+    ).toEqual({
+      matches: true,
+      reasonCodes: ['matched'],
+      detectedSignals: ['account.attr:description'],
+      matchedSignals: ['account.attr:description'],
+    });
+  });
+
+  it('diagnoses expected event IDs with target mismatch', () => {
+    const payload: AccountChangePayload = {
+      kind: 'account_change',
+      target: {
+        samAccountName: 'helper.james',
+        objectSid: baseRequest.target_object_sid,
+      },
+      changes: [
+        {
+          attribute: 'description',
+          previousValue: 'old',
+          nextValue: 'new',
+        },
+      ],
+    };
+    const observed = event(
+      {
+        event_id: 5136,
+        event_type: 'account_update',
+        distinguished_name:
+          'CN=other person,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+        sam_account_name: 'other.person',
+      },
+      {
+        ObjectDN:
+          'CN=other person,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+        TargetSid: 'S-1-5-21-4013827353-799469157-2647928806-1999',
+        AttributeLDAPDisplayName: 'description',
+        AttributeValue: 'new',
+      },
+    );
+
+    expect(
+      evaluateObservedEventForRequest(observed, baseRequest, payload),
+    ).toMatchObject({
+      matches: false,
+      reasonCodes: ['target_mismatch'],
+      detectedSignals: [],
+      matchedSignals: [],
+    });
+  });
+
+  it('diagnoses group membership member mismatch', () => {
+    const request = {
+      ...baseRequest,
+      request_type: 'group_change',
+      target_distinguished_name:
+        'CN=Helpdesk,OU=Groups,OU=ManagedObjects,DC=example,DC=local',
+      target_sam_account_name: 'Helpdesk',
+      target_object_sid: 'S-1-5-32-544',
+    } as ChangeRequestRow;
+    const payload: GroupChangePayload = {
+      kind: 'group_change',
+      target: { samAccountName: 'Helpdesk' },
+      memberChanges: [
+        {
+          operation: 'add',
+          member: {
+            samAccountName: 'helper.james',
+            objectSid: baseRequest.target_object_sid,
+          },
+        },
+      ],
+    };
+    const observed = event(
+      {
+        event_id: 4728,
+        distinguished_name:
+          'CN=Helpdesk,OU=Groups,OU=ManagedObjects,DC=example,DC=local',
+        sam_account_name: 'Helpdesk',
+        subject_account_name: 'other.person',
+      },
+      {
+        TargetUserName: 'Helpdesk',
+        TargetSid: 'S-1-5-32-544',
+        MemberName:
+          'CN=other person,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+        MemberSid: 'S-1-5-21-4013827353-799469157-2647928806-1999',
+      },
+    );
+
+    expect(
+      evaluateObservedEventForRequest(observed, request, payload),
+    ).toMatchObject({
+      matches: false,
+      reasonCodes: ['member_mismatch'],
+      detectedSignals: [],
+      matchedSignals: [],
+    });
+  });
+
+  it('diagnoses signals that were detected but not expected', () => {
+    const payload: AccountChangePayload = {
+      kind: 'account_change',
+      target: {
+        samAccountName: 'helper.james',
+        objectSid: baseRequest.target_object_sid,
+      },
+      changes: [
+        {
+          attribute: 'department',
+          previousValue: 'support',
+          nextValue: 'security',
+        },
+      ],
+    };
+    const observed = event(
+      {
+        event_id: 5136,
+        event_type: 'account_update',
+        distinguished_name:
+          'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+      },
+      {
+        ObjectDN:
+          'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+        TargetSid: baseRequest.target_object_sid,
+        AttributeLDAPDisplayName: 'description',
+        AttributeValue: 'new',
+      },
+    );
+
+    expect(
+      evaluateObservedEventForRequest(observed, baseRequest, payload),
+    ).toEqual({
+      matches: false,
+      reasonCodes: ['signal_not_expected'],
+      detectedSignals: ['account.attr:description'],
+      matchedSignals: [],
+    });
   });
 });

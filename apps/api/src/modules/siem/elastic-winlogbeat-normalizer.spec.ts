@@ -1,6 +1,6 @@
 import { normalizeElasticWinlogbeatHit } from './elastic-winlogbeat-normalizer';
 import { ELASTIC_WINLOGBEAT_DRIVER_KEY } from './siem.constants';
-import type { SiemSourceConfig } from './siem.types';
+import type { SiemFetchedEvent, SiemSourceConfig } from './siem.types';
 
 describe('elastic-winlogbeat-normalizer', () => {
   const source: SiemSourceConfig = {
@@ -60,7 +60,7 @@ describe('elastic-winlogbeat-normalizer', () => {
       },
     });
 
-    expect(normalized?.observedEvent).toMatchObject({
+    expect(expectNormalized(normalized).observedEvent).toMatchObject({
       sourceSystem: 'elastic-winlogbeat',
       sourceReference: '.ds-winlogbeat-9.3.2-2026.04.06-000002:event-1',
       eventId: 4720,
@@ -69,7 +69,9 @@ describe('elastic-winlogbeat-normalizer', () => {
       subjectAccountName: null,
       title: 'User account created',
     });
-    expect(normalized?.sort).toEqual({ values: [1775623872002, 1234] });
+    expect(expectNormalized(normalized).sort).toEqual({
+      values: [1775623872002, 1234],
+    });
   });
 
   it('uses directory resolution for membership member DNs with CN fallback', async () => {
@@ -110,7 +112,7 @@ describe('elastic-winlogbeat-normalizer', () => {
     expect(resolveSamAccountNameFromDistinguishedName).toHaveBeenCalledWith(
       'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
     );
-    expect(normalized?.observedEvent).toMatchObject({
+    expect(expectNormalized(normalized).observedEvent).toMatchObject({
       eventId: 4728,
       eventType: 'group_membership_add',
       samAccountName: 'Helpdesk',
@@ -150,7 +152,10 @@ describe('elastic-winlogbeat-normalizer', () => {
       },
     });
 
-    expect(normalized).toBeUndefined();
+    expect(normalized).toEqual({
+      status: 'rejected',
+      reason: 'outside_scope',
+    });
   });
 
   it('normalizes account disable hits as account events', async () => {
@@ -193,11 +198,116 @@ describe('elastic-winlogbeat-normalizer', () => {
       },
     });
 
-    expect(normalized?.observedEvent).toMatchObject({
+    expect(expectNormalized(normalized).observedEvent).toMatchObject({
       eventId: 4725,
       eventType: 'account_disable',
       samAccountName: 'helper.james',
       title: 'User account disabled',
     });
   });
+
+  it('rejects hits missing source or timestamp', async () => {
+    const normalized = await normalizeElasticWinlogbeatHit({
+      source,
+      cursor: {
+        lastEventTime: null,
+        lastSourceReference: null,
+        lastSort: null,
+        runtimeState: null,
+      },
+      resolveSamAccountNameFromDistinguishedName: jest.fn(),
+      resolveAccountDistinguishedNameBySamAccountName: jest.fn(),
+      resolveGroupDistinguishedNameBySamAccountName: jest.fn(),
+      hit: {
+        _index: '.ds-winlogbeat-9.3.2-2026.04.06-000002',
+        _id: 'event-missing-source',
+      },
+    });
+
+    expect(normalized).toEqual({
+      status: 'rejected',
+      reason: 'missing_source_or_timestamp',
+    });
+  });
+
+  it('rejects the cursor boundary duplicate', async () => {
+    const normalized = await normalizeElasticWinlogbeatHit({
+      source,
+      cursor: {
+        lastEventTime: '2026-04-08T04:51:12.002Z',
+        lastSourceReference:
+          '.ds-winlogbeat-9.3.2-2026.04.06-000002:event-duplicate',
+        lastSort: null,
+        runtimeState: null,
+      },
+      resolveSamAccountNameFromDistinguishedName: jest.fn(),
+      resolveAccountDistinguishedNameBySamAccountName: jest.fn(),
+      resolveGroupDistinguishedNameBySamAccountName: jest.fn(),
+      hit: {
+        _index: '.ds-winlogbeat-9.3.2-2026.04.06-000002',
+        _id: 'event-duplicate',
+        _source: {
+          '@timestamp': '2026-04-08T04:51:12.002Z',
+          event: { code: '4720' },
+          winlog: {
+            channel: 'Security',
+            event_id: '4720',
+            event_data: {
+              TargetUserName: 'helper.james',
+            },
+          },
+        },
+      },
+    });
+
+    expect(normalized).toEqual({
+      status: 'rejected',
+      reason: 'cursor_duplicate',
+    });
+  });
+
+  it('rejects unsupported event IDs', async () => {
+    const normalized = await normalizeElasticWinlogbeatHit({
+      source,
+      cursor: {
+        lastEventTime: null,
+        lastSourceReference: null,
+        lastSort: null,
+        runtimeState: null,
+      },
+      resolveSamAccountNameFromDistinguishedName: jest.fn(),
+      resolveAccountDistinguishedNameBySamAccountName: jest.fn(),
+      resolveGroupDistinguishedNameBySamAccountName: jest.fn(),
+      hit: {
+        _index: '.ds-winlogbeat-9.3.2-2026.04.06-000002',
+        _id: 'event-unsupported',
+        _source: {
+          '@timestamp': '2026-04-08T04:51:12.002Z',
+          event: { code: '4624' },
+          winlog: {
+            channel: 'Security',
+            event_id: '4624',
+            event_data: {},
+          },
+        },
+      },
+    });
+
+    expect(normalized).toEqual({
+      status: 'rejected',
+      reason: 'unsupported_event_id',
+    });
+  });
 });
+
+function expectNormalized(
+  result: Awaited<ReturnType<typeof normalizeElasticWinlogbeatHit>>,
+): SiemFetchedEvent {
+  expect(result.status).toBe('normalized');
+
+  if (result.status !== 'normalized') {
+    throw new Error(`Expected normalized event, got ${result.reason}.`);
+  }
+
+  return result.event;
+}

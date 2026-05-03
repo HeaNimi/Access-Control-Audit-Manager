@@ -2,6 +2,7 @@ import type {
   AccountChangePayload,
   AccountUpdatePayload,
   ChangeRequestPayload,
+  CorrelationDiagnosticReasonCode,
   DirectoryObjectRef,
   GroupChangePayload,
   GroupMembershipPayload,
@@ -50,6 +51,13 @@ type ExecutionStepLike = {
   name: string;
   status: 'completed' | 'failed';
   detail?: Record<string, unknown>;
+};
+
+export type ObservedEventRequestEvaluation = {
+  matches: boolean;
+  reasonCodes: CorrelationDiagnosticReasonCode[];
+  detectedSignals: string[];
+  matchedSignals: string[];
 };
 
 const USER_CREATE_SIGNAL = 'user.create';
@@ -219,14 +227,46 @@ export function doesObservedEventMatchRequest(
   payload: ChangeRequestPayload,
   executionResult?: ExecutionResultLike,
 ): boolean {
+  return evaluateObservedEventForRequest(
+    event,
+    request,
+    payload,
+    executionResult,
+  ).matches;
+}
+
+export function evaluateObservedEventForRequest(
+  event: ObservedEventRow,
+  request: RequestTarget,
+  payload: ChangeRequestPayload,
+  executionResult?: ExecutionResultLike,
+): ObservedEventRequestEvaluation {
   const expectedEventIds = getExpectedEventIds(request.request_type, payload);
   const matchesEventType =
     expectedEventIds.length === 0 ||
     expectedEventIds.includes(event.event_id ?? -1) ||
     event.event_type === request.request_type;
 
+  const detectedSignals = getDiagnosticSignalsForEvent(
+    event,
+    request,
+    payload,
+    executionResult,
+  );
+  const expectedSignals = new Set(
+    getExpectedCorrelationSignals(payload, executionResult),
+  );
+  const matchedSignals = uniqueSignals(
+    detectedSignals.filter((signal) => expectedSignals.has(signal)),
+  );
+
   if (!matchesEventType) {
-    return false;
+    return {
+      matches: false,
+      reasonCodes: ['event_type_not_expected'],
+      detectedSignals,
+      matchedSignals: [],
+    };
   }
 
   if (
@@ -235,10 +275,27 @@ export function doesObservedEventMatchRequest(
     payload.kind === 'group_change' ||
     payload.kind === 'user_create'
   ) {
-    return (
-      getCorrelationSignalsForEvent(event, request, payload, executionResult)
-        .length > 0
-    );
+    if (matchedSignals.length > 0) {
+      return {
+        matches: true,
+        reasonCodes: ['matched'],
+        detectedSignals,
+        matchedSignals,
+      };
+    }
+
+    return {
+      matches: false,
+      reasonCodes: getDiagnosticMismatchReasons(
+        event,
+        request,
+        payload,
+        executionResult,
+        detectedSignals,
+      ),
+      detectedSignals,
+      matchedSignals,
+    };
   }
 
   const matchesTarget = matchesRequestTarget(event, request, payload);
@@ -248,16 +305,37 @@ export function doesObservedEventMatchRequest(
     request.request_type === 'group_membership_remove'
   ) {
     const membershipPayload = payload as GroupMembershipPayload;
-    return (
-      matchesTarget &&
-      matchesDirectoryRef(
-        getEventMemberReference(event),
-        membershipPayload.member,
-      )
+    const matchesMember = matchesDirectoryRef(
+      getEventMemberReference(event),
+      membershipPayload.member,
     );
+
+    if (matchesTarget && matchesMember) {
+      return {
+        matches: true,
+        reasonCodes: ['matched'],
+        detectedSignals,
+        matchedSignals,
+      };
+    }
+
+    return {
+      matches: false,
+      reasonCodes: uniqueReasonCodes([
+        ...(!matchesTarget ? ['target_mismatch' as const] : []),
+        ...(!matchesMember ? ['member_mismatch' as const] : []),
+      ]),
+      detectedSignals,
+      matchedSignals,
+    };
   }
 
-  return matchesTarget;
+  return {
+    matches: matchesTarget,
+    reasonCodes: matchesTarget ? ['matched'] : ['target_mismatch'],
+    detectedSignals,
+    matchedSignals,
+  };
 }
 
 function getExpectedAccountSignals(
@@ -568,6 +646,170 @@ function getGroupChangeSignalsForEvent(
   }
 
   return [getMemberSignalKey(operation, matchingChange.member)];
+}
+
+function getDiagnosticSignalsForEvent(
+  event: ObservedEventRow,
+  request: RequestDirectoryRef,
+  payload: ChangeRequestPayload,
+  executionResult?: ExecutionResultLike,
+): string[] {
+  switch (payload.kind) {
+    case 'account_change':
+      return getAccountChangeDiagnosticSignals(
+        event,
+        request,
+        payload,
+        executionResult,
+      );
+    case 'account_update':
+      return isAccountAttributeEvent(event) &&
+        matchesRequestTarget(event, request, payload, executionResult)
+        ? getAccountSignalsFromObservedEvent(event)
+        : [];
+    case 'user_create':
+      return getUserCreateDiagnosticSignals(
+        event,
+        request,
+        payload,
+        executionResult,
+      );
+    case 'group_change':
+      return getGroupChangeSignalsForEvent(event, request, payload);
+    case 'group_membership_add':
+      return isGroupAddEvent(event) && matchesRequestTarget(event, request, payload)
+        ? [getMemberSignalKey('add', payload.member)]
+        : [];
+    case 'group_membership_remove':
+      return isGroupRemoveEvent(event) &&
+        matchesRequestTarget(event, request, payload)
+        ? [getMemberSignalKey('remove', payload.member)]
+        : [];
+    default:
+      return [];
+  }
+}
+
+function getAccountChangeDiagnosticSignals(
+  event: ObservedEventRow,
+  request: RequestDirectoryRef,
+  payload: AccountChangePayload,
+  executionResult?: ExecutionResultLike,
+): string[] {
+  const signals: string[] = [];
+
+  if (
+    isAccountAttributeEvent(event) &&
+    matchesRequestTarget(event, request, payload, executionResult)
+  ) {
+    signals.push(...getAccountSignalsFromObservedEvent(event));
+  }
+
+  if (
+    isGroupMembershipEvent(event) &&
+    matchesDirectoryRef(
+      getEventMemberReference(event),
+      getPrimaryTargetReference(request),
+    )
+  ) {
+    const operation = isGroupAddEvent(event) ? 'add' : 'remove';
+    const matchingChange = (payload.groupChanges ?? []).find(
+      (change) =>
+        change.operation === operation &&
+        matchesDirectoryRef(getEventTargetReference(event), change.group),
+    );
+
+    if (matchingChange) {
+      signals.push(getGroupSignalKey(operation, matchingChange.group));
+    }
+  }
+
+  return uniqueSignals(signals);
+}
+
+function getUserCreateDiagnosticSignals(
+  event: ObservedEventRow,
+  request: RequestDirectoryRef,
+  payload: UserCreatePayload,
+  executionResult?: ExecutionResultLike,
+): string[] {
+  const signals: string[] = [];
+
+  if (
+    (event.event_id === 4720 || event.event_id === 5137) &&
+    isUserCreateTargetMatch(event, request, payload, executionResult)
+  ) {
+    signals.push(USER_CREATE_SIGNAL);
+  }
+
+  if (
+    isAccountAttributeEvent(event) &&
+    matchesRequestTarget(event, request, payload, executionResult)
+  ) {
+    signals.push(...getAccountSignalsFromObservedEvent(event));
+  }
+
+  if (
+    isGroupAddEvent(event) &&
+    matchesDirectoryRef(
+      getEventMemberReference(event),
+      getPrimaryTargetReference(request),
+    )
+  ) {
+    const matchingGroup = (payload.initialGroups ?? []).find((group) =>
+      matchesDirectoryRef(getEventTargetReference(event), group),
+    );
+
+    if (matchingGroup) {
+      signals.push(getGroupSignalKey('add', matchingGroup));
+    }
+  }
+
+  return uniqueSignals(signals);
+}
+
+function getDiagnosticMismatchReasons(
+  event: ObservedEventRow,
+  request: RequestDirectoryRef,
+  payload: ChangeRequestPayload,
+  executionResult: ExecutionResultLike,
+  detectedSignals: string[],
+): CorrelationDiagnosticReasonCode[] {
+  const reasons: CorrelationDiagnosticReasonCode[] = [];
+
+  if (isGroupMembershipEvent(event)) {
+    const memberMatches =
+      payload.kind === 'group_change'
+        ? payload.memberChanges.some((change) =>
+            matchesDirectoryRef(getEventMemberReference(event), change.member),
+          )
+        : payload.kind === 'account_change' ||
+            payload.kind === 'account_update' ||
+            payload.kind === 'user_create'
+          ? matchesDirectoryRef(
+              getEventMemberReference(event),
+              getPrimaryTargetReference(request),
+            )
+          : true;
+
+    if (!memberMatches) {
+      reasons.push('member_mismatch');
+    }
+  }
+
+  if (!matchesRequestTarget(event, request, payload, executionResult)) {
+    reasons.push('target_mismatch');
+  }
+
+  if (reasons.length === 0 && detectedSignals.length === 0) {
+    reasons.push('no_signal_detected');
+  }
+
+  if (reasons.length === 0 && detectedSignals.length > 0) {
+    reasons.push('signal_not_expected');
+  }
+
+  return uniqueReasonCodes(reasons.length > 0 ? reasons : ['no_signal_detected']);
 }
 
 function getAccountSignalsFromObservedEvent(event: ObservedEventRow): string[] {
@@ -1208,5 +1450,11 @@ function uniqueNumbers(values: number[]): number[] {
 }
 
 function uniqueSignals(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function uniqueReasonCodes(
+  values: CorrelationDiagnosticReasonCode[],
+): CorrelationDiagnosticReasonCode[] {
   return Array.from(new Set(values));
 }

@@ -1,4 +1,7 @@
-import type { ObservedEventIngestDto } from '@acam-ts/contracts';
+import type {
+  ObservedEventIngestDto,
+  SiemNormalizationRejectReason,
+} from '@acam-ts/contracts';
 
 import type {
   SiemCursor,
@@ -44,6 +47,16 @@ export type ElasticHit = {
   sort?: unknown[];
 };
 
+export type ElasticWinlogbeatNormalizationResult =
+  | {
+      status: 'normalized';
+      event: SiemFetchedEvent;
+    }
+  | {
+      status: 'rejected';
+      reason: SiemNormalizationRejectReason;
+    };
+
 export async function normalizeElasticWinlogbeatHit(input: {
   source: SiemSourceConfig;
   hit: ElasticHit;
@@ -57,12 +70,12 @@ export async function normalizeElasticWinlogbeatHit(input: {
   resolveGroupDistinguishedNameBySamAccountName: (
     samAccountName: string | undefined,
   ) => Promise<string | null>;
-}): Promise<SiemFetchedEvent | undefined> {
+}): Promise<ElasticWinlogbeatNormalizationResult> {
   const rawSource = input.hit._source;
   const eventTime = rawSource?.['@timestamp'];
 
   if (!rawSource || !eventTime) {
-    return undefined;
+    return reject('missing_source_or_timestamp');
   }
 
   const sourceReference = `${input.hit._index}:${input.hit._id}`;
@@ -71,7 +84,7 @@ export async function normalizeElasticWinlogbeatHit(input: {
     input.cursor.lastEventTime === eventTime &&
     input.cursor.lastSourceReference === sourceReference
   ) {
-    return undefined;
+    return reject('cursor_duplicate');
   }
 
   const eventId =
@@ -79,7 +92,7 @@ export async function normalizeElasticWinlogbeatHit(input: {
     normalizeEventId(rawSource.winlog?.event_id);
 
   if (!eventId || !input.source.eventIds.includes(eventId)) {
-    return undefined;
+    return reject('unsupported_event_id');
   }
 
   const eventData = rawSource.winlog?.event_data ?? {};
@@ -117,7 +130,7 @@ export async function normalizeElasticWinlogbeatHit(input: {
   });
 
   if (!scopeMatch) {
-    return undefined;
+    return reject('outside_scope');
   }
 
   const observedEvent: ObservedEventIngestDto = {
@@ -145,12 +158,24 @@ export async function normalizeElasticWinlogbeatHit(input: {
   };
 
   return {
-    observedEvent,
-    sort: input.hit.sort
-      ? {
-          values: coerceSortValues(input.hit.sort),
-        }
-      : null,
+    status: 'normalized',
+    event: {
+      observedEvent,
+      sort: input.hit.sort
+        ? {
+            values: coerceSortValues(input.hit.sort),
+          }
+        : null,
+    },
+  };
+}
+
+function reject(
+  reason: SiemNormalizationRejectReason,
+): ElasticWinlogbeatNormalizationResult {
+  return {
+    status: 'rejected',
+    reason,
   };
 }
 

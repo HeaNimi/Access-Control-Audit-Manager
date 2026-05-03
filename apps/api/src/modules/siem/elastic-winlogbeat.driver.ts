@@ -7,6 +7,7 @@ import { toErrorMessage } from '../../common/utils/error.utils';
 import { DirectoryService } from '../directory/directory.service';
 import {
   type ElasticHit,
+  type ElasticWinlogbeatNormalizationResult,
   normalizeElasticWinlogbeatHit,
 } from './elastic-winlogbeat-normalizer';
 import { ELASTIC_WINLOGBEAT_DRIVER_KEY } from './siem.constants';
@@ -15,6 +16,8 @@ import type {
   SiemDriver,
   SiemFetchedEvent,
   SiemFetchResult,
+  SiemNormalizationRejectCounts,
+  SiemNormalizationRejectReason,
   SiemSourceConfig,
 } from './siem.types';
 import { coerceSortValues } from './siem.utils';
@@ -200,15 +203,17 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
       const hits = ((response.hits.hits ?? []) as ElasticHit[]).filter(Boolean);
       const events: SiemFetchedEvent[] = [];
       const warnings: string[] = [];
+      const normalizationRejectCounts: SiemNormalizationRejectCounts = {};
 
       for (const hit of hits) {
         const normalized = await this.normalize(source, hit, cursor);
 
-        if (!normalized) {
+        if (normalized.status === 'rejected') {
+          incrementRejectCount(normalizationRejectCounts, normalized.reason);
           continue;
         }
 
-        events.push(normalized);
+        events.push(normalized.event);
       }
 
       const lastEvent = events.at(-1);
@@ -244,9 +249,14 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
 
       return {
         events,
+        fetchedHitCount: hits.length,
         hasMore,
         nextCursor,
         warnings,
+        normalizationRejectCounts:
+          Object.keys(normalizationRejectCounts).length > 0
+            ? normalizationRejectCounts
+            : undefined,
       };
     } catch (error) {
       if (pitId) {
@@ -286,7 +296,7 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
     source: SiemSourceConfig,
     hit: ElasticHit,
     cursor: SiemCursor,
-  ): Promise<SiemFetchedEvent | undefined> {
+  ): Promise<ElasticWinlogbeatNormalizationResult> {
     return normalizeElasticWinlogbeatHit({
       source,
       hit,
@@ -389,4 +399,11 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
       return;
     }
   }
+}
+
+function incrementRejectCount(
+  counts: SiemNormalizationRejectCounts,
+  reason: SiemNormalizationRejectReason,
+): void {
+  counts[reason] = (counts[reason] ?? 0) + 1;
 }

@@ -98,6 +98,7 @@ describe('ElasticWinlogbeatDriver', () => {
       );
 
       expect(result.events).toHaveLength(1);
+      expect(result.fetchedHitCount).toBe(1);
       expect(result.events[0].observedEvent).toMatchObject({
         eventSource: 'active_directory',
         sourceSystem: 'elastic-winlogbeat',
@@ -120,6 +121,11 @@ describe('ElasticWinlogbeatDriver', () => {
                       gte: '2026-04-08T04:00:00.000Z',
                       lte: '2026-04-08T05:05:00.000Z',
                     }),
+                  },
+                }),
+                expect.objectContaining({
+                  terms: {
+                    'event.code': createSourceConfig().eventIds.map(String),
                   },
                 }),
               ]),
@@ -212,6 +218,137 @@ describe('ElasticWinlogbeatDriver', () => {
       samAccountName: 'Helpdesk',
       subjectAccountName: 'helper.james',
       title: 'User added to group',
+    });
+  });
+
+  it('polls and normalizes 4738 events from event.code', async () => {
+    const directoryService = createDirectoryServiceMock();
+    const driver = new ElasticWinlogbeatDriver(directoryService);
+    const client = {
+      openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-1' }),
+      search: jest.fn().mockResolvedValue({
+        hits: {
+          hits: [
+            {
+              _index: '.ds-winlogbeat-9.3.2-2026.04.06-000002',
+              _id: 'event-4738',
+              _source: {
+                '@timestamp': '2026-04-08T04:51:12.100Z',
+                ecs: { version: '8.0.0' },
+                event: { code: '4738' },
+                message: 'A user account was changed.',
+                winlog: {
+                  channel: 'Security',
+                  event_id: '4738',
+                  provider_name: 'Microsoft-Windows-Security-Auditing',
+                  event_data: {
+                    TargetUserName: 'helper.james',
+                    DisplayName: 'Helper James',
+                  },
+                },
+              },
+              sort: [1775623872100, 1236],
+            },
+          ],
+        },
+      }),
+      closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+    };
+
+    jest
+      .spyOn(
+        driver as unknown as { createClient: () => typeof client },
+        'createClient',
+      )
+      .mockReturnValue(client);
+
+    const result = await driver.fetchBatch(
+      createSourceConfig(),
+      {
+        lastEventTime: '2026-04-08T04:00:00.000Z',
+        lastSort: null,
+        lastSourceReference: null,
+        runtimeState: null,
+      },
+      50,
+    );
+
+    expect(result.fetchedHitCount).toBe(1);
+    expect(result.events[0].observedEvent).toMatchObject({
+      eventId: 4738,
+      eventType: 'account_update',
+      samAccountName: 'helper.james',
+      title: 'User account changed',
+    });
+  });
+
+  it('summarizes normalization reject reasons when fetched hits store no events', async () => {
+    const directoryService = createDirectoryServiceMock();
+    const driver = new ElasticWinlogbeatDriver(directoryService);
+    const client = {
+      openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-1' }),
+      search: jest.fn().mockResolvedValue({
+        hits: {
+          hits: [
+            {
+              _index: '.ds-winlogbeat-9.3.2-2026.04.06-000002',
+              _id: 'event-missing-timestamp',
+              _source: {
+                event: { code: '4720' },
+                winlog: {
+                  channel: 'Security',
+                  event_id: '4720',
+                  event_data: { TargetUserName: 'helper.james' },
+                },
+              },
+              sort: [1775623872002, 1234],
+            },
+            {
+              _index: '.ds-winlogbeat-9.3.2-2026.04.06-000002',
+              _id: 'event-unsupported',
+              _source: {
+                '@timestamp': '2026-04-08T04:51:12.012Z',
+                event: { code: '4624' },
+                winlog: {
+                  channel: 'Security',
+                  event_id: '4624',
+                  event_data: {},
+                },
+              },
+              sort: [1775623872012, 1235],
+            },
+          ],
+        },
+      }),
+      closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+    };
+
+    jest
+      .spyOn(
+        driver as unknown as { createClient: () => typeof client },
+        'createClient',
+      )
+      .mockReturnValue(client);
+
+    const result = await driver.fetchBatch(
+      createSourceConfig(),
+      {
+        lastEventTime: '2026-04-08T04:00:00.000Z',
+        lastSort: null,
+        lastSourceReference: null,
+        runtimeState: null,
+      },
+      50,
+    );
+
+    expect(result.events).toEqual([]);
+    expect(result.fetchedHitCount).toBe(2);
+    expect(result.warnings).toEqual([
+      'Fetched events but none could be normalized into observed events.',
+    ]);
+    expect(result.normalizationRejectCounts).toEqual({
+      missing_source_or_timestamp: 1,
+      unsupported_event_id: 1,
     });
   });
 });

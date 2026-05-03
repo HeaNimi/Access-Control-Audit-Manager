@@ -337,6 +337,97 @@ describe('RequestsService object visibility', () => {
     expect(service.getDetail).toHaveBeenCalledWith('request-1', administrator);
   });
 
+  it('writes execution audit timestamps and LDAP result details', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(Date.parse('2026-04-15T09:10:00.000Z'));
+    const {
+      service,
+      auditService,
+      correlationService,
+    } = createService();
+    const internals = service as never;
+    const request = createRequestRow({
+      status: 'approved',
+      request_number: 42,
+    });
+
+    jest.spyOn(internals, 'getRequestByIdOrThrow').mockResolvedValue(request);
+    jest.spyOn(internals, 'markExecutionStarted').mockResolvedValue(undefined);
+    jest.spyOn(internals, 'markExecutionFinished').mockResolvedValue(undefined);
+    jest
+      .spyOn(internals, 'executeDirectoryRequestSafely')
+      .mockImplementation(async () => {
+        jest.setSystemTime(Date.parse('2026-04-15T09:10:01.250Z'));
+
+        return {
+          success: true,
+          message: 'LDAP execution completed.',
+          changedDn:
+            'CN=testuser1,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+          changedAttributes: ['department'],
+          raw: {
+            mode: 'ldap',
+            steps: [
+              {
+                name: 'update-attributes',
+                status: 'completed',
+                detail: {
+                  attributes: ['department'],
+                },
+              },
+            ],
+          },
+        };
+      });
+
+    try {
+      await (service as unknown as { executeApprovedRequest: (id: string) => Promise<void> })
+        .executeApprovedRequest('request-1');
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(auditService.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'execution_started',
+        eventDetails: {
+          requestNumber: 42,
+          requestType: 'account_change',
+          startedAt: '2026-04-15T09:10:00.000Z',
+        },
+      }),
+    );
+    expect(auditService.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'execution_finished',
+        eventDetails: {
+          requestNumber: 42,
+          requestType: 'account_change',
+          startedAt: '2026-04-15T09:10:00.000Z',
+          finishedAt: '2026-04-15T09:10:01.250Z',
+          durationMs: 1250,
+          executionStatus: 'executed',
+          changedDn:
+            'CN=testuser1,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+          changedAttributes: ['department'],
+          raw: {
+            mode: 'ldap',
+            steps: [
+              {
+                name: 'update-attributes',
+                status: 'completed',
+                detail: {
+                  attributes: ['department'],
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(correlationService.correlateRequest).toHaveBeenCalledWith('request-1');
+  });
+
   it('returns created request detail using the requesters visibility context', async () => {
     const {
       service,

@@ -9,6 +9,7 @@ import {
 
 import {
   type ChangeRequestDetail,
+  type CorrelationDiagnosticsView,
   type ChangeRequestPayload,
   type ChangeRequestSummary,
   type AuthenticatedUserProfile,
@@ -326,6 +327,21 @@ export class RequestsService {
     });
   }
 
+  async getCorrelationDiagnostics(
+    requestId: string,
+    actor: AuthenticatedUser,
+  ): Promise<CorrelationDiagnosticsView> {
+    await this.getVisibleRequestByIdOrThrow(requestId, actor);
+    const diagnostics =
+      await this.correlationService.getDiagnostics(requestId);
+
+    if (!diagnostics) {
+      throw new NotFoundException('Change request not found.');
+    }
+
+    return diagnostics;
+  }
+
   private async executeApprovedRequest(requestId: string): Promise<void> {
     const request = await this.getRequestByIdOrThrow(requestId);
     const payload = parseChangeRequestPayload(request.request_data);
@@ -347,7 +363,9 @@ export class RequestsService {
       entityId: requestId,
       message: 'Automatic directory execution started.',
       eventDetails: {
+        requestNumber: request.request_number,
         requestType: request.request_type,
+        startedAt: startedAt.toISOString(),
       },
     });
 
@@ -387,6 +405,12 @@ export class RequestsService {
       entityId: requestId,
       message: sanitizePostgresText(result.message),
       eventDetails: {
+        requestNumber: request.request_number,
+        requestType: request.request_type,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        executionStatus: result.success ? 'executed' : 'failed',
         changedDn: result.changedDn,
         changedAttributes: result.changedAttributes ?? [],
         raw: sanitizeJsonForPostgres(result.raw ?? {}),

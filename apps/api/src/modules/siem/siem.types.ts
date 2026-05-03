@@ -1,6 +1,10 @@
 import type {
   ObservedEventIngestDto,
   RuntimeHealthCheck,
+  SiemNormalizationRejectCounts,
+  SiemNormalizationRejectReason,
+  SiemPollSourceResultView,
+  SiemPollSummaryView,
 } from '@acam-ts/contracts';
 
 export interface SiemSortState {
@@ -41,10 +45,14 @@ export interface SiemFetchedEvent {
 
 export interface SiemFetchResult {
   events: SiemFetchedEvent[];
+  fetchedHitCount: number;
   hasMore: boolean;
   nextCursor: SiemCursor;
   warnings: string[];
+  normalizationRejectCounts?: SiemNormalizationRejectCounts;
 }
+
+export type { SiemNormalizationRejectCounts, SiemNormalizationRejectReason };
 
 export interface SiemDriver {
   readonly key: string;
@@ -60,7 +68,7 @@ export interface SiemDriver {
   disposeCursor?(source: SiemSourceConfig, cursor: SiemCursor): Promise<void>;
 }
 
-export interface SiemSourcePollResult {
+export interface SiemSourcePollResult extends SiemPollSourceResultView {
   sourceKey: string;
   driverKey: string;
   status: 'success' | 'error' | 'skipped';
@@ -68,12 +76,13 @@ export interface SiemSourcePollResult {
   storedCount: number;
   warningCount: number;
   warnings: string[];
+  normalizationRejectCounts?: SiemNormalizationRejectCounts;
   lastEventTime?: string | null;
   lastSourceReference?: string | null;
   error?: string | null;
 }
 
-export interface SiemPollSummary {
+export interface SiemPollSummary extends SiemPollSummaryView {
   trigger: 'startup' | 'interval' | 'manual';
   startedAt: string;
   finishedAt: string;

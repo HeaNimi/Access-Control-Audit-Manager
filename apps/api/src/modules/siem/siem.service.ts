@@ -17,6 +17,7 @@ import type {
   SiemPollSummary,
   SiemSourceConfig,
   SiemSourcePollResult,
+  SiemNormalizationRejectCounts,
 } from './siem.types';
 
 @Injectable()
@@ -132,7 +133,7 @@ export class SiemService {
         status: 'skipped',
         fetchedCount: 0,
         storedCount: 0,
-        warningCount: 0,
+        warningCount: 1,
         warnings: ['SIEM polling is disabled.'],
       };
     }
@@ -178,6 +179,7 @@ export class SiemService {
     const checkpoint = await this.checkpointRepository.getOrCreate(source);
     let cursor = this.checkpointRepository.toCursor(checkpoint, source);
     const warnings: string[] = [];
+    const normalizationRejectCounts: SiemNormalizationRejectCounts = {};
     let fetchedCount = 0;
     let storedCount = 0;
 
@@ -190,15 +192,12 @@ export class SiemService {
         );
         cursor = batch.nextCursor;
         warnings.push(...batch.warnings);
+        this.mergeRejectCounts(
+          normalizationRejectCounts,
+          batch.normalizationRejectCounts,
+        );
 
-        for (const warning of batch.warnings) {
-          this.logPollWarning(source, warning, {
-            trigger: input.trigger,
-            cursor,
-          });
-        }
-
-        fetchedCount += batch.events.length;
+        fetchedCount += batch.fetchedHitCount;
 
         for (const event of batch.events) {
           await this.observedEventsService.ingest(event.observedEvent);
@@ -225,6 +224,19 @@ export class SiemService {
 
       await this.checkpointRepository.updateSuccess(source, cursor);
 
+      if (
+        warnings.length > 0 ||
+        Object.keys(normalizationRejectCounts).length > 0
+      ) {
+        this.logPollWarning(source, 'SIEM poll completed with warnings.', {
+          trigger: input.trigger,
+          fetchedCount,
+          storedCount,
+          warnings,
+          normalizationRejectCounts,
+        });
+      }
+
       if (input.trigger === 'manual') {
         await this.auditService.write({
           requestId: null,
@@ -241,6 +253,7 @@ export class SiemService {
             fetchedCount,
             storedCount,
             warnings,
+            normalizationRejectCounts,
           },
         });
       }
@@ -251,8 +264,12 @@ export class SiemService {
         status: 'success',
         fetchedCount,
         storedCount,
-        warningCount: warnings.length,
+        warningCount: this.countWarnings(warnings, normalizationRejectCounts),
         warnings,
+        normalizationRejectCounts:
+          Object.keys(normalizationRejectCounts).length > 0
+            ? normalizationRejectCounts
+            : undefined,
         lastEventTime: cursor.lastEventTime ?? null,
         lastSourceReference: cursor.lastSourceReference ?? null,
       };
@@ -271,6 +288,7 @@ export class SiemService {
         fetchedCount,
         storedCount,
         warnings,
+        normalizationRejectCounts,
       });
 
       await this.auditService.write({
@@ -286,6 +304,7 @@ export class SiemService {
           sourceKey: source.sourceKey,
           driverKey: source.driverKey,
           error: errorMessage,
+          normalizationRejectCounts,
         },
       });
 
@@ -295,8 +314,12 @@ export class SiemService {
         status: 'error',
         fetchedCount,
         storedCount,
-        warningCount: warnings.length,
+        warningCount: this.countWarnings(warnings, normalizationRejectCounts),
         warnings,
+        normalizationRejectCounts:
+          Object.keys(normalizationRejectCounts).length > 0
+            ? normalizationRejectCounts
+            : undefined,
         lastEventTime: cursor.lastEventTime ?? null,
         lastSourceReference: cursor.lastSourceReference ?? null,
         error: errorMessage,
@@ -318,5 +341,34 @@ export class SiemService {
       driverKey: source.driverKey,
       ...meta,
     });
+  }
+
+  private mergeRejectCounts(
+    target: SiemNormalizationRejectCounts,
+    source?: SiemNormalizationRejectCounts,
+  ): void {
+    if (!source) {
+      return;
+    }
+
+    for (const [reason, count] of Object.entries(source)) {
+      if (!count) {
+        continue;
+      }
+
+      const typedReason = reason as keyof SiemNormalizationRejectCounts;
+      target[typedReason] = (target[typedReason] ?? 0) + count;
+    }
+  }
+
+  private countWarnings(
+    warnings: string[],
+    normalizationRejectCounts: SiemNormalizationRejectCounts,
+  ): number {
+    return (
+      warnings.length +
+      Object.values(normalizationRejectCounts).filter((count) => (count ?? 0) > 0)
+        .length
+    );
   }
 }

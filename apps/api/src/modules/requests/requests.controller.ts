@@ -61,4 +61,13 @@ export class RequestsController {
   ) {
     return this.requestsService.getTimeline(requestId, user);
   }
+
+  @Get(':requestId/correlation-diagnostics')
+  @Roles('administrator', 'auditor')
+  async correlationDiagnostics(
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.requestsService.getCorrelationDiagnostics(requestId, user);
+  }
 }

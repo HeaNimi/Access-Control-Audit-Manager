@@ -192,6 +192,56 @@ export interface ChangeRequestDetail extends ChangeRequestSummary {
   correlations: EventCorrelationView[];
 }
 
+export type CorrelationDiagnosticReasonCode =
+  | "outside_time_window"
+  | "event_type_not_expected"
+  | "target_mismatch"
+  | "member_mismatch"
+  | "signal_not_expected"
+  | "no_signal_detected"
+  | "ambiguous_request_match"
+  | "already_correlated"
+  | "matched";
+
+export interface CorrelationDiagnosticAttempt {
+  startedAt: string;
+  finishedAt: string | null;
+  lowerBound: string;
+  upperBound: string;
+  expectedSignals: string[];
+  matchedSignals: string[];
+}
+
+export interface CorrelationDiagnosticObservedEvent {
+  observedEventId: number;
+  eventId: number | null;
+  eventType: string | null;
+  eventTime: string;
+  title: string | null;
+  distinguishedName: string | null;
+  samAccountName: string | null;
+  subjectAccountName: string | null;
+  correlationState: CorrelationState;
+  sourceReference: string | null;
+  detectedSignals: string[];
+  matchedSignals: string[];
+  reasonCodes: CorrelationDiagnosticReasonCode[];
+  matchingRequestIds: string[];
+}
+
+export interface CorrelationDiagnosticsView {
+  requestId: string;
+  requestNumber: number;
+  requestType: RequestType;
+  status: RequestStatus;
+  expectedEventIds: number[];
+  expectedSignals: string[];
+  matchedSignals: string[];
+  attempts: CorrelationDiagnosticAttempt[];
+  correlatedEvents: CorrelationDiagnosticObservedEvent[];
+  candidateEvents: CorrelationDiagnosticObservedEvent[];
+}
+
 export interface RequestTimelineItem {
   id: string;
   kind:
