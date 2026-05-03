@@ -24,6 +24,7 @@ import type {
 
 import type { AuthenticatedUser } from '../../common/auth/auth.types';
 import { DATABASE_TOKEN } from '../../common/database/database.constants';
+import { AppLogService } from '../../common/logging/app-log.service';
 import { ReadModelService } from '../../common/read-model/read-model.service';
 import {
   resolveCreatedDescription,
@@ -54,6 +55,7 @@ export class RequestsService {
     private readonly directoryService: DirectoryService,
     private readonly correlationService: CorrelationService,
     private readonly readModelService: ReadModelService,
+    private readonly appLogService: AppLogService,
   ) {}
 
   async create(
@@ -122,6 +124,13 @@ export class RequestsService {
         requestNumber: request.request_number,
         requestType: request.request_type,
       },
+    });
+    this.appLogService.info('requests', 'Change request submitted.', {
+      requestId: request.request_id,
+      requestNumber: request.request_number,
+      requestType: request.request_type,
+      actorUsername: actor.username,
+      approverUsername: dto.approverUsername,
     });
 
     return this.getDetail(request.request_id, actor);
@@ -225,6 +234,17 @@ export class RequestsService {
         decisionComment: dto.decisionComment ?? null,
       },
     });
+    this.appLogService.info(
+      'requests',
+      dto.decision === 'approved'
+        ? 'Change request approved.'
+        : 'Change request rejected.',
+      {
+        requestId,
+        decision: dto.decision,
+        actorUsername: actor.username,
+      },
+    );
 
     if (dto.decision === 'approved') {
       await this.executeApprovedRequest(requestId);
@@ -271,6 +291,13 @@ export class RequestsService {
         previousErrorMessage: execution.error_message,
       },
     });
+    this.appLogService.warning('requests', 'Directory execution retry requested.', {
+      requestId,
+      executionId: execution.execution_id,
+      actorUsername: actor.username,
+      previousExecutionStatus: execution.execution_status,
+      previousErrorMessage: execution.error_message,
+    });
 
     await this.executeApprovedRequest(requestId);
 
@@ -305,6 +332,12 @@ export class RequestsService {
     const startedAt = new Date();
 
     await this.markExecutionStarted(requestId, startedAt);
+    this.appLogService.info('execution', 'Directory execution started.', {
+      requestId,
+      requestNumber: request.request_number,
+      requestType: request.request_type,
+      startedAt: startedAt.toISOString(),
+    });
 
     await this.auditService.write({
       requestId,
@@ -327,6 +360,24 @@ export class RequestsService {
     const finishedAt = new Date();
 
     await this.markExecutionFinished(requestId, result, finishedAt);
+    this.appLogService.info(
+      'execution',
+      result.success
+        ? 'Directory execution finished.'
+        : 'Directory execution failed.',
+      {
+        requestId,
+        requestNumber: request.request_number,
+        requestType: request.request_type,
+        success: result.success,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        changedDn: result.changedDn,
+        changedAttributes: result.changedAttributes ?? [],
+        message: result.message,
+      },
+    );
 
     await this.auditService.write({
       requestId,
@@ -354,6 +405,11 @@ export class RequestsService {
     try {
       return await this.directoryService.execute(context);
     } catch (error) {
+      this.appLogService.captureException('execution', error, {
+        requestId: context.requestId,
+        requestNumber: context.requestNumber,
+        requestType: context.requestType,
+      });
       return this.buildExecutionFailureResult(error);
     }
   }

@@ -10,6 +10,10 @@ type ApplicationLogFilter = {
   source?: string;
 };
 
+type AppLogWriteOptions = {
+  persist?: boolean;
+};
+
 @Injectable()
 export class AppLogService extends ConsoleLogger implements LoggerService {
   readonly startedAt = new Date();
@@ -51,8 +55,34 @@ export class AppLogService extends ConsoleLogger implements LoggerService {
     this.writeEntry('error', message, context, stack ? { stack } : undefined);
   }
 
-  info(source: string, message: string, meta?: Record<string, unknown>): void {
+  info(
+    source: string,
+    message: string,
+    meta?: Record<string, unknown>,
+    options: AppLogWriteOptions = {},
+  ): void {
+    super.log(message, source);
+
+    if (options.persist === false) {
+      return;
+    }
+
     this.writeEntry('log', message, source, meta);
+  }
+
+  warning(
+    source: string,
+    message: string,
+    meta?: Record<string, unknown>,
+    options: AppLogWriteOptions = {},
+  ): void {
+    super.warn(message, source);
+
+    if (options.persist === false) {
+      return;
+    }
+
+    this.writeEntry('warn', message, source, meta);
   }
 
   captureException(

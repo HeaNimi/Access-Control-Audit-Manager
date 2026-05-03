@@ -20,6 +20,7 @@ export class RequestLoggingMiddleware implements NestMiddleware {
           statusCode: response.statusCode,
           durationMs: Date.now() - startedAt,
         },
+        { persist: false },
       );
     });
 

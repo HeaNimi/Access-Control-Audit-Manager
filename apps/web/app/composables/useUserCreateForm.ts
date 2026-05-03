@@ -49,6 +49,7 @@ export function useUserCreateForm(input: {
   user: Ref<AuthenticatedUserProfile | null>;
   defaultUpnSuffix: Ref<string>;
   defaultMailDomain: Ref<string>;
+  defaultUsersOuDn: Ref<string>;
 }) {
   const createdDescriptionTimestamp = new Date();
   const defaults = reactive<UserCreateDefaultsState>({
@@ -73,7 +74,7 @@ export function useUserCreateForm(input: {
       input.user.value,
       createdDescriptionTimestamp,
     ),
-    ouDistinguishedName: "OU=Users,DC=example,DC=local",
+    ouDistinguishedName: input.defaultUsersOuDn.value,
     initialGroups: [],
   });
 
@@ -148,6 +149,13 @@ export function useUserCreateForm(input: {
       }
     },
     { immediate: true },
+  );
+
+  watch(
+    () => input.defaultUsersOuDn.value,
+    (defaultUsersOuDn) => {
+      form.ouDistinguishedName = defaultUsersOuDn;
+    },
   );
 
   function markDefaultAsManual(field: keyof UserCreateDefaultsState) {

@@ -6,6 +6,7 @@ import type {
 } from '@acam-ts/contracts';
 
 import type { AuthenticatedUser } from '../../common/auth/auth.types';
+import { AppLogService } from '../../common/logging/app-log.service';
 import { toErrorMessage } from '../../common/utils/error.utils';
 import { AuditService } from '../audit/audit.service';
 import { ObservedEventsService } from '../observed-events/observed-events.service';
@@ -26,6 +27,7 @@ export class SiemService {
     private readonly driverRegistry: SiemDriverRegistry,
     private readonly siemConfigService: SiemConfigService,
     private readonly checkpointRepository: SiemCheckpointRepository,
+    private readonly appLogService: AppLogService,
   ) {}
 
   isSchedulerEnabled(): boolean {
@@ -120,6 +122,10 @@ export class SiemService {
       this.siemConfigService.getSourceConfigurationIssue(source);
 
     if (!input.force && !source.enabled) {
+      this.logPollWarning(source, 'SIEM polling is disabled.', {
+        trigger: input.trigger,
+      });
+
       return {
         sourceKey: source.sourceKey,
         driverKey: source.driverKey,
@@ -132,6 +138,10 @@ export class SiemService {
     }
 
     if (configuredIssue) {
+      this.logPollWarning(source, configuredIssue, {
+        trigger: input.trigger,
+      });
+
       return {
         sourceKey: source.sourceKey,
         driverKey: source.driverKey,
@@ -147,6 +157,12 @@ export class SiemService {
     const driver = this.driverRegistry.getDriver(source.driverKey);
 
     if (!driver) {
+      const warning = `Configured SIEM driver ${source.driverKey} is not registered.`;
+
+      this.logPollWarning(source, warning, {
+        trigger: input.trigger,
+      });
+
       return {
         sourceKey: source.sourceKey,
         driverKey: source.driverKey,
@@ -154,10 +170,8 @@ export class SiemService {
         fetchedCount: 0,
         storedCount: 0,
         warningCount: 1,
-        warnings: [
-          `Configured SIEM driver ${source.driverKey} is not registered.`,
-        ],
-        error: `Configured SIEM driver ${source.driverKey} is not registered.`,
+        warnings: [warning],
+        error: warning,
       };
     }
 
@@ -176,6 +190,14 @@ export class SiemService {
         );
         cursor = batch.nextCursor;
         warnings.push(...batch.warnings);
+
+        for (const warning of batch.warnings) {
+          this.logPollWarning(source, warning, {
+            trigger: input.trigger,
+            cursor,
+          });
+        }
+
         fetchedCount += batch.events.length;
 
         for (const event of batch.events) {
@@ -242,6 +264,15 @@ export class SiemService {
       const errorMessage = toErrorMessage(error, 'SIEM poll failed.');
 
       await this.checkpointRepository.updateError(source, errorMessage, cursor);
+      this.appLogService.captureException('siem', error, {
+        trigger: input.trigger,
+        sourceKey: source.sourceKey,
+        driverKey: source.driverKey,
+        fetchedCount,
+        storedCount,
+        warnings,
+      });
+
       await this.auditService.write({
         requestId: null,
         actor: input.actor ?? null,
@@ -275,5 +306,17 @@ export class SiemService {
 
   private getBatchSize(): number {
     return this.siemConfigService.getBatchSize();
+  }
+
+  private logPollWarning(
+    source: SiemSourceConfig,
+    warning: string,
+    meta: Record<string, unknown> = {},
+  ): void {
+    this.appLogService.warning('siem', warning, {
+      sourceKey: source.sourceKey,
+      driverKey: source.driverKey,
+      ...meta,
+    });
   }
 }

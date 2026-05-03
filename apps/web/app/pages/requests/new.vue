@@ -29,6 +29,9 @@ const defaultUpnSuffix = computed(
 const defaultMailDomain = computed(
   () => runtimeConfig.public.defaultMailDomain || defaultUpnSuffix.value,
 );
+const defaultUsersOuDn = computed(
+  () => runtimeConfig.public.defaultUsersOuDn || "",
+);
 
 const requestDetails = reactive({
   kind: "user_create" as "user_create" | "account_change" | "group_change",
@@ -45,6 +48,7 @@ const userCreate = useUserCreateForm({
   user,
   defaultUpnSuffix,
   defaultMailDomain,
+  defaultUsersOuDn,
 });
 const accountChangeEditor = useAccountChangeEditor();
 const groupChangeEditor = useGroupChangeEditor();

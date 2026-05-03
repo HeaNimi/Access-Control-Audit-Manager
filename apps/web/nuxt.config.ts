@@ -29,6 +29,10 @@ export default defineNuxtConfig({
         process.env.NUXT_PUBLIC_DEFAULT_UPN_SUFFIX ??
         process.env.LDAP_UPN_SUFFIX ??
         "example.local",
+      defaultUsersOuDn:
+        process.env.NUXT_PUBLIC_USERS_OU_DN ??
+        process.env.LDAP_USERS_OU_DN ??
+        "",
     },
   },
 });

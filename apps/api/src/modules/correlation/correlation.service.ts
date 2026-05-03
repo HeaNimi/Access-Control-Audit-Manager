@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import type { CorrelationState, RequestStatus } from '@acam-ts/contracts';
 import type {
+  AuditLogRow,
   ChangeRequestRow,
   DatabaseSchema,
   ObservedEventRow,
@@ -10,6 +11,7 @@ import type {
 } from '../../common/database/schema';
 
 import { DATABASE_TOKEN } from '../../common/database/database.constants';
+import { AppLogService } from '../../common/logging/app-log.service';
 import {
   collectMatchedCorrelationSignals,
   doesObservedEventMatchRequest,
@@ -25,6 +27,7 @@ export class CorrelationService {
     @Inject(DATABASE_TOKEN)
     private readonly db: Kysely<DatabaseSchema>,
     private readonly auditService: AuditService,
+    private readonly appLogService: AppLogService,
   ) {}
 
   async correlateRequest(requestId: string): Promise<void> {
@@ -38,16 +41,15 @@ export class CorrelationService {
       return;
     }
 
-    const execution = await this.db
-      .selectFrom('request_execution')
-      .selectAll()
-      .where('request_id', '=', requestId)
-      .executeTakeFirst();
+    const execution = await this.loadCurrentExecution(requestId);
+    const attempts = await this.loadExecutionAttempts(requestId, execution);
 
     const candidates = await this.findCandidateObservedEventsForRequest(
       request,
-      execution,
+      attempts,
     );
+    let matchedCount = 0;
+    let ambiguousCount = 0;
 
     for (const event of candidates) {
       const matchingRequests = await this.findMatchingRequestIdsForEvent(event);
@@ -58,8 +60,30 @@ export class CorrelationService {
           event.observed_event_id,
           'Matched by request workflow',
         );
+        matchedCount += 1;
+      } else if (matchingRequests.length > 1) {
+        ambiguousCount += 1;
+        this.appLogService.warning(
+          'correlation',
+          'Observed event matched multiple requests and was not auto-correlated.',
+          {
+            requestId,
+            observedEventId: event.observed_event_id,
+            matchingRequestIds: matchingRequests,
+          },
+        );
       }
     }
+
+    this.appLogService.info('correlation', 'Request correlation evaluated.', {
+      requestId,
+      requestNumber: request.request_number,
+      requestType: request.request_type,
+      executionAttemptCount: attempts.length,
+      candidateCount: candidates.length,
+      matchedCount,
+      ambiguousCount,
+    });
   }
 
   async correlateObservedEvent(observedEventId: number): Promise<void> {
@@ -80,6 +104,33 @@ export class CorrelationService {
         matches[0],
         observedEventId,
         'Matched on event ingest',
+      );
+      this.appLogService.info('correlation', 'Observed event correlated.', {
+        observedEventId,
+        requestId: matches[0],
+      });
+    } else if (matches.length > 1) {
+      this.appLogService.warning(
+        'correlation',
+        'Observed event matched multiple requests and was not auto-correlated.',
+        {
+          observedEventId,
+          matchingRequestIds: matches,
+        },
+      );
+    } else {
+      this.appLogService.info(
+        'correlation',
+        'Observed event did not match a request.',
+        {
+          observedEventId,
+          eventId: event.event_id,
+          eventType: event.event_type,
+          eventTime: event.event_time.toISOString(),
+          distinguishedName: event.distinguished_name,
+          samAccountName: event.sam_account_name,
+          subjectAccountName: event.subject_account_name,
+        },
       );
     }
   }
@@ -112,11 +163,8 @@ export class CorrelationService {
     }
 
     const payload = parseChangeRequestPayload(request.request_data);
-    const execution = await this.db
-      .selectFrom('request_execution')
-      .selectAll()
-      .where('request_id', '=', requestId)
-      .executeTakeFirst();
+    const execution = await this.loadCurrentExecution(requestId);
+    const attempts = await this.loadExecutionAttempts(requestId, execution);
     const matchedEvents = await this.db
       .selectFrom('event_correlation as ec')
       .innerJoin(
@@ -137,17 +185,28 @@ export class CorrelationService {
         payload.kind === 'group_change') ||
       (request.request_type === 'user_create' && payload.kind === 'user_create')
     ) {
+      const latestExecutionResult =
+        attempts.at(-1)?.executionResult ?? execution?.execution_result;
       const expectedSignals = getExpectedCorrelationSignals(
         payload,
-        execution?.execution_result,
+        latestExecutionResult,
       );
       const matchedSignals = new Set(
-        collectMatchedCorrelationSignals(
-          matchedEvents,
-          request,
-          payload,
-          execution?.execution_result,
-        ),
+        attempts.length > 0
+          ? attempts.flatMap((attempt) =>
+              collectMatchedCorrelationSignals(
+                matchedEvents,
+                request,
+                payload,
+                attempt.executionResult,
+              ),
+            )
+          : collectMatchedCorrelationSignals(
+              matchedEvents,
+              request,
+              payload,
+              execution?.execution_result,
+            ),
       );
 
       if (
@@ -229,57 +288,70 @@ export class CorrelationService {
 
   private async findCandidateObservedEventsForRequest(
     request: ChangeRequestRow,
-    execution?: RequestExecutionRow,
+    attempts: CorrelationExecutionAttempt[],
   ): Promise<ObservedEventRow[]> {
     const windowSeconds = Number(
       process.env.CORRELATION_WINDOW_SECONDS ?? '60',
     );
-    const lowerBound = new Date(
-      (
-        execution?.started_at ??
-        request.approved_at ??
-        request.submitted_at
-      ).getTime() -
-        windowSeconds * 1000,
-    );
-    const upperBound = new Date(
-      (execution?.finished_at ?? request.executed_at ?? new Date()).getTime() +
-        windowSeconds * 1000,
-    );
-
     const payload = parseChangeRequestPayload(request.request_data);
     const expectedEventIds = getExpectedEventIds(request.request_type, payload);
-    let query = this.db
-      .selectFrom('observed_event as oe')
-      .leftJoin(
-        'event_correlation as ec',
-        'ec.observed_event_id',
-        'oe.observed_event_id',
-      )
-      .selectAll('oe')
-      .where('ec.observed_event_id', 'is', null)
-      .where('oe.event_time', '>=', lowerBound)
-      .where('oe.event_time', '<=', upperBound);
+    const windows =
+      attempts.length > 0
+        ? attempts
+        : [
+            {
+              startedAt: request.approved_at ?? request.submitted_at,
+              finishedAt: request.executed_at ?? new Date(),
+              executionResult: undefined,
+            },
+          ];
+    const candidatesById = new Map<number, ObservedEventRow>();
 
-    if (expectedEventIds.length > 0) {
-      query = query.where((eb) =>
-        eb.or([
-          eb('oe.event_id', 'in', expectedEventIds),
-          eb('oe.event_type', '=', request.request_type),
-        ]),
+    for (const attempt of windows) {
+      const lowerBound = new Date(
+        attempt.startedAt.getTime() - windowSeconds * 1000,
       );
+      const upperBound = new Date(
+        (attempt.finishedAt ?? new Date()).getTime() + windowSeconds * 1000,
+      );
+      let query = this.db
+        .selectFrom('observed_event as oe')
+        .leftJoin(
+          'event_correlation as ec',
+          'ec.observed_event_id',
+          'oe.observed_event_id',
+        )
+        .selectAll('oe')
+        .where('ec.observed_event_id', 'is', null)
+        .where('oe.event_time', '>=', lowerBound)
+        .where('oe.event_time', '<=', upperBound);
+
+      if (expectedEventIds.length > 0) {
+        query = query.where((eb) =>
+          eb.or([
+            eb('oe.event_id', 'in', expectedEventIds),
+            eb('oe.event_type', '=', request.request_type),
+          ]),
+        );
+      }
+
+      const rows = await query.execute();
+
+      for (const row of rows) {
+        if (
+          doesObservedEventMatchRequest(
+            row,
+            request,
+            payload,
+            attempt.executionResult,
+          )
+        ) {
+          candidatesById.set(row.observed_event_id, row);
+        }
+      }
     }
 
-    const rows = await query.execute();
-
-    return rows.filter((row) =>
-      doesObservedEventMatchRequest(
-        row,
-        request,
-        payload,
-        execution?.execution_result,
-      ),
-    );
+    return Array.from(candidatesById.values());
   }
 
   private async findMatchingRequestIdsForEvent(
@@ -294,26 +366,26 @@ export class CorrelationService {
     const matches: string[] = [];
 
     for (const request of requests) {
-      const execution = await this.db
-        .selectFrom('request_execution')
-        .selectAll()
-        .where('request_id', '=', request.request_id)
-        .executeTakeFirst();
-
-      if (!this.isWithinTimeWindow(event.event_time, request, execution)) {
-        continue;
-      }
-
+      const execution = await this.loadCurrentExecution(request.request_id);
+      const attempts = await this.loadExecutionAttempts(
+        request.request_id,
+        execution,
+      );
       const payload = parseChangeRequestPayload(request.request_data);
+      const matchingAttempt = this.findMatchingAttemptForEvent(
+        event,
+        request,
+        attempts,
+        (attempt) =>
+          doesObservedEventMatchRequest(
+            event,
+            request,
+            payload,
+            attempt.executionResult,
+          ),
+      );
 
-      if (
-        doesObservedEventMatchRequest(
-          event,
-          request,
-          payload,
-          execution?.execution_result,
-        )
-      ) {
+      if (matchingAttempt) {
         matches.push(request.request_id);
       }
     }
@@ -321,27 +393,154 @@ export class CorrelationService {
     return matches;
   }
 
-  private isWithinTimeWindow(
-    eventTime: Date,
+  private findMatchingAttemptForEvent(
+    event: ObservedEventRow,
     request: ChangeRequestRow,
-    execution?: RequestExecutionRow,
-  ): boolean {
+    attempts: CorrelationExecutionAttempt[],
+    predicate: (attempt: CorrelationExecutionAttempt) => boolean = () => true,
+  ): CorrelationExecutionAttempt | undefined {
     const windowSeconds = Number(
       process.env.CORRELATION_WINDOW_SECONDS ?? '60',
     );
-    const lowerBound = new Date(
-      (
-        execution?.started_at ??
-        request.approved_at ??
-        request.submitted_at
-      ).getTime() -
-        windowSeconds * 1000,
-    );
-    const upperBound = new Date(
-      (execution?.finished_at ?? request.executed_at ?? new Date()).getTime() +
-        windowSeconds * 1000,
-    );
+    const windows =
+      attempts.length > 0
+        ? attempts
+        : [
+            {
+              startedAt: request.approved_at ?? request.submitted_at,
+              finishedAt: request.executed_at ?? new Date(),
+              executionResult: undefined,
+            },
+          ];
 
-    return eventTime >= lowerBound && eventTime <= upperBound;
+    return windows.find((attempt) => {
+      const lowerBound = new Date(
+        attempt.startedAt.getTime() - windowSeconds * 1000,
+      );
+      const upperBound = new Date(
+        (attempt.finishedAt ?? new Date()).getTime() + windowSeconds * 1000,
+      );
+
+      return (
+        event.event_time >= lowerBound &&
+        event.event_time <= upperBound &&
+        predicate(attempt)
+      );
+    });
+  }
+
+  private async loadCurrentExecution(
+    requestId: string,
+  ): Promise<RequestExecutionRow | undefined> {
+    return this.db
+      .selectFrom('request_execution')
+      .selectAll()
+      .where('request_id', '=', requestId)
+      .executeTakeFirst();
+  }
+
+  private async loadExecutionAttempts(
+    requestId: string,
+    currentExecution?: RequestExecutionRow,
+  ): Promise<CorrelationExecutionAttempt[]> {
+    const auditRows = await this.db
+      .selectFrom('audit_log')
+      .selectAll()
+      .where('request_id', '=', requestId)
+      .where('event_type', 'in', [
+        'execution_started',
+        'execution_finished',
+        'execution_failed',
+      ])
+      .orderBy('created_at', 'asc')
+      .execute();
+    const attempts = this.buildAttemptsFromAuditRows(auditRows);
+
+    if (
+      currentExecution &&
+      !attempts.some(
+        (attempt) =>
+          attempt.startedAt.getTime() === currentExecution.started_at.getTime(),
+      )
+    ) {
+      attempts.push({
+        startedAt: currentExecution.started_at,
+        finishedAt: currentExecution.finished_at,
+        executionResult: currentExecution.execution_result,
+      });
+    }
+
+    return attempts.sort(
+      (left, right) => left.startedAt.getTime() - right.startedAt.getTime(),
+    );
+  }
+
+  private buildAttemptsFromAuditRows(
+    rows: AuditLogRow[],
+  ): CorrelationExecutionAttempt[] {
+    const attempts: CorrelationExecutionAttempt[] = [];
+    let current: CorrelationExecutionAttempt | null = null;
+
+    for (const row of rows) {
+      if (row.event_type === 'execution_started') {
+        if (current) {
+          attempts.push(current);
+        }
+
+        current = {
+          startedAt: row.created_at,
+          finishedAt: null,
+          executionResult: undefined,
+        };
+        continue;
+      }
+
+      if (
+        row.event_type !== 'execution_finished' &&
+        row.event_type !== 'execution_failed'
+      ) {
+        continue;
+      }
+
+      if (!current) {
+        current = {
+          startedAt: row.created_at,
+          finishedAt: row.created_at,
+          executionResult: this.readExecutionResultFromAuditRow(row),
+        };
+        attempts.push(current);
+        current = null;
+        continue;
+      }
+
+      current.finishedAt = row.created_at;
+      current.executionResult = this.readExecutionResultFromAuditRow(row);
+      attempts.push(current);
+      current = null;
+    }
+
+    if (current) {
+      attempts.push(current);
+    }
+
+    return attempts;
+  }
+
+  private readExecutionResultFromAuditRow(
+    row: AuditLogRow,
+  ): Record<string, unknown> | undefined {
+    const raw = row.event_details.raw;
+
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return undefined;
+    }
+
+    return raw as Record<string, unknown>;
   }
 }
+
+type CorrelationExecutionAttempt = {
+  startedAt: Date;
+  finishedAt: Date | null;
+  executionResult?: Record<string, unknown> | null;
+};

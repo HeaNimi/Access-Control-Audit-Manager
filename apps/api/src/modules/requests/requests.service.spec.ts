@@ -178,6 +178,11 @@ describe('RequestsService object visibility', () => {
       mapAuditRow: jest.fn(),
       mapObservedEventRow: jest.fn(),
     };
+    const appLogService = {
+      info: jest.fn(),
+      warning: jest.fn(),
+      captureException: jest.fn(),
+    };
 
     const service = new RequestsService(
       db as never,
@@ -186,6 +191,7 @@ describe('RequestsService object visibility', () => {
       directoryService as never,
       correlationService as never,
       readModelService as never,
+      appLogService as never,
     );
 
     return {
@@ -200,6 +206,7 @@ describe('RequestsService object visibility', () => {
       auditService,
       correlationService,
       readModelService,
+      appLogService,
     };
   }
 
