@@ -62,12 +62,15 @@ export class CorrelationService {
       const matchingRequests = await this.findMatchingRequestIdsForEvent(event);
 
       if (matchingRequests.length === 1 && matchingRequests[0] === requestId) {
-        await this.createEventCorrelation(
+        const correlationCreated = await this.createEventCorrelation(
           requestId,
           event.observed_event_id,
           'Matched by request workflow',
         );
-        matchedCount += 1;
+
+        if (correlationCreated) {
+          matchedCount += 1;
+        }
       } else if (matchingRequests.length > 1) {
         ambiguousCount += 1;
         this.appLogService.warning(
@@ -107,15 +110,27 @@ export class CorrelationService {
     const matches = await this.findMatchingRequestIdsForEvent(event);
 
     if (matches.length === 1) {
-      await this.createEventCorrelation(
+      const correlationCreated = await this.createEventCorrelation(
         matches[0],
         observedEventId,
         'Matched on event ingest',
       );
-      this.appLogService.info('correlation', 'Observed event correlated.', {
-        observedEventId,
-        requestId: matches[0],
-      });
+
+      if (correlationCreated) {
+        this.appLogService.info('correlation', 'Observed event correlated.', {
+          observedEventId,
+          requestId: matches[0],
+        });
+      } else {
+        this.appLogService.info(
+          'correlation',
+          'Observed event was already correlated.',
+          {
+            observedEventId,
+            requestId: matches[0],
+          },
+        );
+      }
     } else if (matches.length > 1) {
       this.appLogService.warning(
         'correlation',
@@ -272,7 +287,8 @@ export class CorrelationService {
       payload,
       latestExecutionResult,
     );
-    const correlatedRows = await this.loadCorrelatedObservedEventRows(requestId);
+    const correlatedRows =
+      await this.loadCorrelatedObservedEventRows(requestId);
     const diagnosticAttempts = this.buildDiagnosticAttempts(
       attempts,
       request,
@@ -300,15 +316,14 @@ export class CorrelationService {
         ),
     );
     const matchedSignals = Array.from(
-      new Set(
-        correlatedEvents.flatMap((event) => event.matchedSignals),
-      ),
+      new Set(correlatedEvents.flatMap((event) => event.matchedSignals)),
     );
 
     return {
       requestId: request.request_id,
       requestNumber: request.request_number,
-      requestType: request.request_type as CorrelationDiagnosticsView['requestType'],
+      requestType:
+        request.request_type as CorrelationDiagnosticsView['requestType'],
       status: request.status as CorrelationDiagnosticsView['status'],
       expectedEventIds,
       expectedSignals,
@@ -323,17 +338,16 @@ export class CorrelationService {
     requestId: string,
     observedEventId: number,
     note: string,
-  ): Promise<void> {
-    await this.db.transaction().execute(async (trx) => {
+  ): Promise<boolean> {
+    return this.db.transaction().execute(async (trx) => {
       const existing = await trx
         .selectFrom('event_correlation')
-        .select('correlation_id')
-        .where('request_id', '=', requestId)
+        .select(['correlation_id', 'request_id'])
         .where('observed_event_id', '=', observedEventId)
         .executeTakeFirst();
 
       if (existing) {
-        return;
+        return false;
       }
 
       const auditLogId = await this.auditService.write(
@@ -360,6 +374,8 @@ export class CorrelationService {
           note,
         })
         .execute();
+
+      return true;
     });
   }
 
@@ -445,7 +461,8 @@ export class CorrelationService {
         Date.now(),
         request.executed_at?.getTime() ?? 0,
         ...attempts.map(
-          (attempt) => attempt.finishedAt?.getTime() ?? attempt.startedAt.getTime(),
+          (attempt) =>
+            attempt.finishedAt?.getTime() ?? attempt.startedAt.getTime(),
         ),
       ) +
         this.getCorrelationWindowSeconds() * 1000,
@@ -606,7 +623,8 @@ export class CorrelationService {
         ),
         matchedSignals: collectMatchedCorrelationSignals(
           correlatedRows.filter(
-            (row) => row.event_time >= lowerBound && row.event_time <= upperBound,
+            (row) =>
+              row.event_time >= lowerBound && row.event_time <= upperBound,
           ),
           request,
           payload,
@@ -631,7 +649,12 @@ export class CorrelationService {
     const executionResult =
       matchingAttempt?.executionResult ?? attempts.at(-1)?.executionResult;
     const evaluation = matchingAttempt
-      ? evaluateObservedEventForRequest(event, request, payload, executionResult)
+      ? evaluateObservedEventForRequest(
+          event,
+          request,
+          payload,
+          executionResult,
+        )
       : {
           matches: false,
           reasonCodes: ['outside_time_window' as const],
@@ -639,8 +662,9 @@ export class CorrelationService {
           matchedSignals: [],
         };
     const matchingRequestIds = await this.findMatchingRequestIdsForEvent(event);
-    const correlationState =
-      await this.getObservedEventCorrelationState(event.observed_event_id);
+    const correlationState = await this.getObservedEventCorrelationState(
+      event.observed_event_id,
+    );
     const reasonCodes = new Set(evaluation.reasonCodes);
 
     if (matchingRequestIds.length > 1) {
@@ -722,7 +746,8 @@ export class CorrelationService {
         }
 
         current = {
-          startedAt: this.readDateFromAuditDetails(row, 'startedAt') ?? row.created_at,
+          startedAt:
+            this.readDateFromAuditDetails(row, 'startedAt') ?? row.created_at,
           finishedAt: null,
           executionResult: undefined,
         };

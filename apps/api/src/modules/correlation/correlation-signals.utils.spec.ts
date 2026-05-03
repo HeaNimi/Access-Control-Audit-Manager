@@ -1,6 +1,5 @@
 import type {
   AccountChangePayload,
-  ChangeRequestPayload,
   GroupChangePayload,
   UserCreatePayload,
 } from '@acam-ts/contracts';
@@ -167,9 +166,9 @@ describe('correlation-signals.utils', () => {
       },
     );
 
-    expect(getCorrelationSignalForEvent(disableObserved, baseRequest, payload)).toBe(
-      'account.disable',
-    );
+    expect(
+      getCorrelationSignalForEvent(disableObserved, baseRequest, payload),
+    ).toBe('account.disable');
     expect(
       getCorrelationSignalForEvent(removeObserved, baseRequest, payload),
     ).toBe(
@@ -299,9 +298,9 @@ describe('correlation-signals.utils', () => {
       },
     );
 
-    expect(getCorrelationSignalsForEvent(observed, baseRequest, payload)).toEqual([
-      'account.rename',
-    ]);
+    expect(
+      getCorrelationSignalsForEvent(observed, baseRequest, payload),
+    ).toEqual(['account.rename']);
     expect(doesObservedEventMatchRequest(observed, baseRequest, payload)).toBe(
       true,
     );
@@ -336,16 +335,16 @@ describe('correlation-signals.utils', () => {
       {
         TargetUserName: 'helper.james',
         TargetSid: baseRequest.target_object_sid,
+        SamAccountName: 'helper.james',
         DisplayName: 'Helper J.',
         OldUacValue: '0x200',
         NewUacValue: '0x202',
       },
     );
 
-    expect(getCorrelationSignalsForEvent(observed, baseRequest, payload)).toEqual([
-      'account.attr:displayName',
-      'account.disable',
-    ]);
+    expect(
+      getCorrelationSignalsForEvent(observed, baseRequest, payload),
+    ).toEqual(['account.attr:displayName', 'account.disable']);
   });
 
   it('filters expected signals to completed execution steps when execution data exists', () => {

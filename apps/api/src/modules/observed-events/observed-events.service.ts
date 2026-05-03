@@ -1,7 +1,10 @@
 import type { Kysely } from 'kysely';
 import { Inject, Injectable } from '@nestjs/common';
 
-import type { ObservedEventsListView } from '@acam-ts/contracts';
+import type {
+  ObservedEventsListView,
+  ObservedEventView,
+} from '@acam-ts/contracts';
 import type { DatabaseSchema, JsonObject } from '../../common/database/schema';
 
 import { DATABASE_TOKEN } from '../../common/database/database.constants';
@@ -14,6 +17,12 @@ import {
 import { CorrelationService } from '../correlation/correlation.service';
 import { ObservedEventIngestDto } from './dto/observed-event-ingest.dto';
 
+export interface ObservedEventIngestResult {
+  event: ObservedEventView;
+  observedEventId: number;
+  created: boolean;
+}
+
 @Injectable()
 export class ObservedEventsService {
   constructor(
@@ -23,8 +32,15 @@ export class ObservedEventsService {
     private readonly appLogService: AppLogService,
   ) {}
 
-  async ingest(dto: ObservedEventIngestDto) {
+  async ingest(dto: ObservedEventIngestDto): Promise<ObservedEventView> {
+    return (await this.ingestWithResult(dto)).event;
+  }
+
+  async ingestWithResult(
+    dto: ObservedEventIngestDto,
+  ): Promise<ObservedEventIngestResult> {
     let observedEventId: number;
+    let created = false;
     const eventSource = sanitizePostgresText(dto.eventSource);
     const sourceSystem = sanitizePostgresText(dto.sourceSystem);
     const sourceReference = sanitizePostgresText(dto.sourceReference);
@@ -55,32 +71,52 @@ export class ObservedEventsService {
         .executeTakeFirstOrThrow();
 
       observedEventId = inserted.observed_event_id;
-    } catch {
+      created = true;
+    } catch (error) {
       const existing = await this.db
         .selectFrom('observed_event')
         .select('observed_event_id')
         .where('event_source', '=', eventSource)
         .where('source_system', '=', sourceSystem)
         .where('source_reference', '=', sourceReference)
-        .executeTakeFirstOrThrow();
+        .executeTakeFirst();
+
+      if (!existing) {
+        throw error;
+      }
 
       observedEventId = existing.observed_event_id;
     }
 
     this.appLogService.info(
       'observed-events',
-      'Observed technical event ingested.',
+      created
+        ? 'Observed technical event ingested.'
+        : 'Observed technical event already existed.',
       {
         observedEventId,
         eventSource: dto.eventSource,
         sourceSystem: dto.sourceSystem,
         sourceReference: dto.sourceReference,
+        created,
       },
     );
 
-    await this.correlationService.correlateObservedEvent(observedEventId);
+    const correlationState = created
+      ? 'out_of_band'
+      : await this.correlationService.getObservedEventCorrelationState(
+          observedEventId,
+        );
 
-    return this.getById(observedEventId);
+    if (correlationState !== 'matched') {
+      await this.correlationService.correlateObservedEvent(observedEventId);
+    }
+
+    return {
+      event: await this.getById(observedEventId),
+      observedEventId,
+      created,
+    };
   }
 
   async list(
@@ -113,7 +149,10 @@ export class ObservedEventsService {
               .executeTakeFirstOrThrow()
           ).count ?? 0,
         );
-    const totalPages = Math.max(1, Math.ceil(totalEntries / normalizedPageSize));
+    const totalPages = Math.max(
+      1,
+      Math.ceil(totalEntries / normalizedPageSize),
+    );
     const normalizedPage = Math.max(1, Math.min(page, totalPages));
     const rows = unmatchedOnly
       ? await this.db
@@ -140,9 +179,7 @@ export class ObservedEventsService {
           .execute();
 
     return {
-      entries: await Promise.all(
-        rows.map((row) => this.mapRow(row)),
-      ),
+      entries: await Promise.all(rows.map((row) => this.mapRow(row))),
       page: normalizedPage,
       pageSize: normalizedPageSize,
       totalEntries,

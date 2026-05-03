@@ -1,12 +1,19 @@
 import { ELASTIC_WINLOGBEAT_DRIVER_KEY } from './siem.constants';
 import { SiemService } from './siem.service';
-import type {
-  SiemCursor,
-  SiemDriver,
-  SiemSourceConfig,
-} from './siem.types';
+import type { SiemCursor, SiemDriver, SiemSourceConfig } from './siem.types';
 
 describe('SiemService poll summaries', () => {
+  type AuditWriteInput = {
+    eventType?: string;
+    eventDetails?: Record<string, unknown>;
+  };
+
+  type IngestResult = {
+    created: boolean;
+    observedEventId: number;
+    event: Record<string, unknown>;
+  };
+
   function createSource(
     overrides: Partial<SiemSourceConfig> = {},
   ): SiemSourceConfig {
@@ -40,11 +47,24 @@ describe('SiemService poll summaries', () => {
       lastSort: null,
       runtimeState: null,
     };
+    const auditWrite: jest.MockedFunction<
+      (input: AuditWriteInput) => Promise<number>
+    > = jest.fn().mockResolvedValue(1);
+    const ingestWithResult: jest.MockedFunction<
+      (event: unknown) => Promise<IngestResult>
+    > = jest.fn().mockResolvedValue({
+      created: true,
+      observedEventId: 1,
+      event: {},
+    });
+    const checkpointUpdateSuccess: jest.MockedFunction<
+      (sourceConfig: SiemSourceConfig, nextCursor: SiemCursor) => Promise<void>
+    > = jest.fn().mockResolvedValue(undefined);
     const auditService = {
-      write: jest.fn().mockResolvedValue(1),
+      write: auditWrite,
     };
     const observedEventsService = {
-      ingest: jest.fn().mockResolvedValue(undefined),
+      ingestWithResult,
     };
     const driverRegistry = {
       getDriver: jest.fn().mockReturnValue(input.driver),
@@ -59,7 +79,7 @@ describe('SiemService poll summaries', () => {
     const checkpointRepository = {
       getOrCreate: jest.fn().mockResolvedValue({}),
       toCursor: jest.fn().mockReturnValue(cursor),
-      updateSuccess: jest.fn().mockResolvedValue(undefined),
+      updateSuccess: checkpointUpdateSuccess,
       updateError: jest.fn().mockResolvedValue(undefined),
     };
     const appLogService = {
@@ -140,15 +160,15 @@ describe('SiemService poll summaries', () => {
     expect(auditService.write).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'siem_pull_completed',
-        eventDetails: expect.objectContaining({
-          fetchedCount: 2,
-          storedCount: 0,
-          normalizationRejectCounts: {
-            outside_scope: 2,
-          },
-        }),
       }),
     );
+    expect(auditService.write.mock.calls[0]?.[0].eventDetails).toMatchObject({
+      fetchedCount: 2,
+      storedCount: 0,
+      normalizationRejectCounts: {
+        outside_scope: 2,
+      },
+    });
   });
 
   it('reports disabled polling as one logged warning', async () => {
@@ -229,17 +249,13 @@ describe('SiemService poll summaries', () => {
         ],
       }),
     );
-    expect(auditService.write).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventDetails: expect.objectContaining({
-          fetchedCount: 1,
-          storedCount: 0,
-          warnings: [
-            'Fetched events but none could be normalized into observed events.',
-          ],
-        }),
-      }),
-    );
+    expect(auditService.write.mock.calls[0]?.[0].eventDetails).toMatchObject({
+      fetchedCount: 1,
+      storedCount: 0,
+      warnings: [
+        'Fetched events but none could be normalized into observed events.',
+      ],
+    });
   });
 
   it('does not move the checkpoint backwards for overlapped duplicate events', async () => {
@@ -280,17 +296,27 @@ describe('SiemService poll summaries', () => {
       }),
       disposeCursor: jest.fn().mockResolvedValue(undefined),
     };
-    const { service, checkpointRepository } = createService({
-      source,
-      driver,
+    const { service, checkpointRepository, observedEventsService } =
+      createService({
+        source,
+        driver,
+      });
+    observedEventsService.ingestWithResult.mockResolvedValueOnce({
+      created: false,
+      observedEventId: 1,
+      event: {},
     });
 
-    await service.pollConfiguredSources({
+    const summary = await service.pollConfiguredSources({
       trigger: 'manual',
       force: true,
       actor: null,
     });
 
+    expect(summary.sourceResults[0]).toMatchObject({
+      fetchedCount: 1,
+      storedCount: 0,
+    });
     expect(checkpointRepository.updateSuccess).toHaveBeenCalledWith(
       source,
       expect.objectContaining({

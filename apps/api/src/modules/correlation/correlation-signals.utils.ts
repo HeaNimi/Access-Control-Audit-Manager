@@ -83,9 +83,7 @@ export function getExpectedEventIds(
           : []),
       ]);
     case 'account_change':
-      return [
-        4722, 4725, 4738, 4781, 5136, 4728, 4729, 4732, 4733, 4756, 4757,
-      ];
+      return [4722, 4725, 4738, 4781, 5136, 4728, 4729, 4732, 4733, 4756, 4757];
     case 'group_change':
       return [4728, 4729, 4732, 4733, 4756, 4757];
     case 'account_update':
@@ -304,10 +302,9 @@ export function evaluateObservedEventForRequest(
     request.request_type === 'group_membership_add' ||
     request.request_type === 'group_membership_remove'
   ) {
-    const membershipPayload = payload as GroupMembershipPayload;
     const matchesMember = matchesDirectoryRef(
       getEventMemberReference(event),
-      membershipPayload.member,
+      payload.member,
     );
 
     if (matchesTarget && matchesMember) {
@@ -344,10 +341,7 @@ function getExpectedAccountSignals(
 ): string[] {
   const plannedSignals = uniqueSignals([
     ...(payload.changes ?? []).flatMap((change) =>
-      toAccountSignalsForRequestedAttribute(
-        change.attribute,
-        change.nextValue,
-      ),
+      toAccountSignalsForRequestedAttribute(change.attribute, change.nextValue),
     ),
     ...('groupChanges' in payload
       ? (payload.groupChanges ?? []).map((change) =>
@@ -407,7 +401,9 @@ function getExpectedAccountSignals(
       });
 
       if (matchesCompletedGroupStep) {
-        signals.push(getGroupSignalKey(groupChange.operation, groupChange.group));
+        signals.push(
+          getGroupSignalKey(groupChange.operation, groupChange.group),
+        );
       }
     }
   }
@@ -421,8 +417,10 @@ function getExpectedUserCreateSignals(
 ): string[] {
   const plannedSignals = uniqueSignals([
     USER_CREATE_SIGNAL,
-    ...(payload.target.enabled ?? true ? [ACCOUNT_ENABLE_SIGNAL] : []),
-    ...(payload.initialGroups ?? []).map((group) => getGroupSignalKey('add', group)),
+    ...((payload.target.enabled ?? true) ? [ACCOUNT_ENABLE_SIGNAL] : []),
+    ...(payload.initialGroups ?? []).map((group) =>
+      getGroupSignalKey('add', group),
+    ),
   ]);
 
   const completedSteps = getCompletedExecutionSteps(executionResult);
@@ -501,7 +499,9 @@ function getExpectedGroupChangeSignals(
     });
 
     if (matchesCompletedStep) {
-      signals.push(getMemberSignalKey(memberChange.operation, memberChange.member));
+      signals.push(
+        getMemberSignalKey(memberChange.operation, memberChange.member),
+      );
     }
   }
 
@@ -597,7 +597,9 @@ function getUserCreateSignalsForEvent(
     isAccountAttributeEvent(event) &&
     matchesRequestTarget(event, request, payload, executionResult)
   ) {
-    if (getAccountSignalsFromObservedEvent(event).includes(ACCOUNT_ENABLE_SIGNAL)) {
+    if (
+      getAccountSignalsFromObservedEvent(event).includes(ACCOUNT_ENABLE_SIGNAL)
+    ) {
       signals.push(ACCOUNT_ENABLE_SIGNAL);
     }
   }
@@ -630,7 +632,10 @@ function getGroupChangeSignalsForEvent(
   request: RequestDirectoryRef,
   payload: GroupChangePayload,
 ): string[] {
-  if (!isGroupMembershipEvent(event) || !matchesRequestTarget(event, request, payload)) {
+  if (
+    !isGroupMembershipEvent(event) ||
+    !matchesRequestTarget(event, request, payload)
+  ) {
     return [];
   }
 
@@ -677,7 +682,8 @@ function getDiagnosticSignalsForEvent(
     case 'group_change':
       return getGroupChangeSignalsForEvent(event, request, payload);
     case 'group_membership_add':
-      return isGroupAddEvent(event) && matchesRequestTarget(event, request, payload)
+      return isGroupAddEvent(event) &&
+        matchesRequestTarget(event, request, payload)
         ? [getMemberSignalKey('add', payload.member)]
         : [];
     case 'group_membership_remove':
@@ -809,7 +815,9 @@ function getDiagnosticMismatchReasons(
     reasons.push('signal_not_expected');
   }
 
-  return uniqueReasonCodes(reasons.length > 0 ? reasons : ['no_signal_detected']);
+  return uniqueReasonCodes(
+    reasons.length > 0 ? reasons : ['no_signal_detected'],
+  );
 }
 
 function getAccountSignalsFromObservedEvent(event: ObservedEventRow): string[] {
@@ -841,10 +849,6 @@ function getAccountSignalsFromObservedEvent(event: ObservedEventRow): string[] {
 function getSignalsFrom4738Event(event: ObservedEventRow): string[] {
   const eventData = getObservedEventData(event);
   const signals: string[] = [];
-
-  if (readMeaningfulString(eventData.SamAccountName)) {
-    signals.push(ACCOUNT_RENAME_SIGNAL);
-  }
 
   if (readMeaningfulString(eventData.DisplayName)) {
     signals.push(toAccountAttributeSignal('displayName'));
@@ -939,7 +943,10 @@ function isUserCreateTargetMatch(
     return false;
   }
 
-  return matchesDirectoryRef(getEventTargetReference(event), executionTargetReference);
+  return matchesDirectoryRef(
+    getEventTargetReference(event),
+    executionTargetReference,
+  );
 }
 
 function matchesRequestTarget(
@@ -1004,7 +1011,9 @@ function getRequestTargetReferences(
   return references;
 }
 
-function getPrimaryTargetReference(request: RequestDirectoryRef): DirectoryRefLike {
+function getPrimaryTargetReference(
+  request: RequestDirectoryRef,
+): DirectoryRefLike {
   return {
     objectGuid: request.target_object_guid,
     objectSid: request.target_object_sid,
@@ -1063,10 +1072,7 @@ function getCompletedExecutionSteps(
     const name = readString(record?.name);
     const status = readString(record?.status);
 
-    if (
-      !name ||
-      (status !== 'completed' && status !== 'failed')
-    ) {
+    if (!name || (status !== 'completed' && status !== 'failed')) {
       return accumulator;
     }
 

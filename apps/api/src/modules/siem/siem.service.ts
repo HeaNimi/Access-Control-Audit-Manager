@@ -211,14 +211,24 @@ export class SiemService {
         fetchedCount += this.countFetchedBatchHits(batch);
 
         for (const event of batch.events) {
-          await this.observedEventsService.ingest(event.observedEvent);
-          storedCount += 1;
+          const ingestResult =
+            await this.observedEventsService.ingestWithResult(
+              event.observedEvent,
+            );
+
+          if (ingestResult.created) {
+            storedCount += 1;
+          }
+
           checkpointCursor = this.advanceCheckpointCursor(
             checkpointCursor,
             event,
           );
 
-          await this.checkpointRepository.updateSuccess(source, checkpointCursor);
+          await this.checkpointRepository.updateSuccess(
+            source,
+            checkpointCursor,
+          );
         }
 
         if (!batch.hasMore) {
@@ -383,8 +393,9 @@ export class SiemService {
   ): number {
     return (
       warnings.length +
-      Object.values(normalizationRejectCounts).filter((count) => (count ?? 0) > 0)
-        .length
+      Object.values(normalizationRejectCounts).filter(
+        (count) => (count ?? 0) > 0,
+      ).length
     );
   }
 
@@ -399,10 +410,9 @@ export class SiemService {
       Number.isFinite(batch.fetchedHitCount)
         ? batch.fetchedHitCount
         : 0;
-    const rejectCount = Object.values(batch.normalizationRejectCounts ?? {}).reduce(
-      (sum, count) => sum + (count ?? 0),
-      0,
-    );
+    const rejectCount = Object.values(
+      batch.normalizationRejectCounts ?? {},
+    ).reduce((sum, count) => sum + (count ?? 0), 0);
     const inferredMinimum = batch.events.length + rejectCount;
     const warningIndicatesFetchedHits = batch.warnings.some((warning) =>
       warning.toLowerCase().includes('fetched events but none'),
