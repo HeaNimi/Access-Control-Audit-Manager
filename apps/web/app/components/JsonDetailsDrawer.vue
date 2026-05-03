@@ -5,15 +5,17 @@ const props = defineProps<{
   open: boolean;
   title: string;
   subtitle?: string;
-  sections: Array<{
-    label: string;
-    value: unknown;
-  }>;
+  sections: JsonDetailsSection[];
 }>();
 
 const emit = defineEmits<{
   close: [];
 }>();
+
+type JsonDetailsSection = {
+  label: string;
+  value: unknown;
+};
 
 const drawerContentElement = ref<HTMLElement | null>(null);
 const copiedSectionLabel = ref<string | null>(null);
@@ -28,10 +30,14 @@ const openModel = computed({
   },
 });
 
-function isEventInsideDrawer(event: PointerDownOutsideEvent | FocusOutsideEvent) {
+function isEventInsideDrawer(
+  event: PointerDownOutsideEvent | FocusOutsideEvent,
+) {
   const target = event.detail.originalEvent.target;
 
-  return target instanceof Node && !!drawerContentElement.value?.contains(target);
+  return (
+    target instanceof Node && !!drawerContentElement.value?.contains(target)
+  );
 }
 
 function handlePointerDownOutside(event: PointerDownOutsideEvent) {
@@ -40,7 +46,9 @@ function handlePointerDownOutside(event: PointerDownOutsideEvent) {
   }
 }
 
-function handleInteractOutside(event: PointerDownOutsideEvent | FocusOutsideEvent) {
+function handleInteractOutside(
+  event: PointerDownOutsideEvent | FocusOutsideEvent,
+) {
   if (isEventInsideDrawer(event)) {
     event.preventDefault();
   }
@@ -55,7 +63,24 @@ function stringifyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
-async function copySectionJson(section: { label: string; value: unknown }) {
+async function writeClipboardText(content: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(content);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = content;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+async function copySectionJson(section: JsonDetailsSection) {
   const content = stringifyJson(section.value);
 
   if (copiedResetTimeout) {
@@ -64,7 +89,7 @@ async function copySectionJson(section: { label: string; value: unknown }) {
   }
 
   try {
-    await navigator.clipboard.writeText(content);
+    await writeClipboardText(content);
     copiedSectionLabel.value = section.label;
     copiedResetTimeout = setTimeout(() => {
       copiedSectionLabel.value = null;
@@ -90,7 +115,7 @@ onBeforeUnmount(() => {
     :dismissible="true"
     :content="drawerContentProps"
     :ui="{
-      content: 'max-w-2xl'
+      content: 'max-w-2xl',
     }"
   >
     <template #content>
@@ -102,7 +127,9 @@ onBeforeUnmount(() => {
         @pointerdown.stop
         @touchstart.stop
       >
-        <div class="flex items-start justify-between gap-4 border-b border-default px-6 py-5">
+        <div
+          class="flex items-start justify-between gap-4 border-b border-default px-6 py-5"
+        >
           <div class="space-y-1">
             <h3 class="text-lg font-semibold text-highlighted">
               {{ props.title }}
@@ -120,41 +147,39 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-          <UPageCard
+          <section
             v-for="section in props.sections"
             :key="section.label"
-            :title="section.label"
-            variant="subtle"
+            class="space-y-2"
           >
-            <template #header>
-              <div class="flex items-center justify-between gap-3">
-                <h4 class="text-sm font-semibold text-highlighted">
-                  {{ section.label }}
-                </h4>
-                <UButton
-                  color="neutral"
-                  variant="ghost"
-                  size="xs"
-                  :icon="
-                    copiedSectionLabel === section.label
-                      ? 'i-lucide-check'
-                      : 'i-lucide-copy'
-                  "
-                  :aria-label="`Copy ${section.label} JSON`"
-                  :title="
-                    copiedSectionLabel === section.label
-                      ? 'Copied'
-                      : 'Copy JSON'
-                  "
-                  @click="copySectionJson(section)"
-                >
-                  {{ copiedSectionLabel === section.label ? "Copied" : "Copy" }}
-                </UButton>
-              </div>
-            </template>
+            <div class="flex items-center justify-between gap-3">
+              <h4 class="text-sm font-semibold text-highlighted">
+                {{ section.label }}
+              </h4>
+              <UButton
+                color="neutral"
+                variant="outline"
+                size="xs"
+                class="shrink-0"
+                :icon="
+                  copiedSectionLabel === section.label
+                    ? 'i-lucide-check'
+                    : 'i-lucide-copy'
+                "
+                :aria-label="`Copy ${section.label} JSON`"
+                :title="
+                  copiedSectionLabel === section.label ? 'Copied' : 'Copy JSON'
+                "
+                @click="copySectionJson(section)"
+              >
+                {{
+                  copiedSectionLabel === section.label ? "Copied" : "Copy JSON"
+                }}
+              </UButton>
+            </div>
 
             <pre class="json-block">{{ stringifyJson(section.value) }}</pre>
-          </UPageCard>
+          </section>
         </div>
       </div>
     </template>
