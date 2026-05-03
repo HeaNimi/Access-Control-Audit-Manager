@@ -1,4 +1,4 @@
-name: Container Publish
+name: Container Publish on GHCR
 
 on:
   workflow_dispatch:
