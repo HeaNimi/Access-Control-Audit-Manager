@@ -1,6 +1,6 @@
 {
   "name": "api",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "NestJS backend for the ACAM thesis prototype",
   "author": "",
   "private": true,

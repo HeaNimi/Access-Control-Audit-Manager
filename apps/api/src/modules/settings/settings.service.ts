@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Kysely } from 'kysely';
@@ -18,6 +21,11 @@ import { AuthService } from '../auth/auth.service';
 import { DirectoryService } from '../directory/directory.service';
 import { SiemService } from '../siem/siem.service';
 
+type PackageJsonLike = {
+  name?: unknown;
+  version?: unknown;
+};
+
 @Injectable()
 export class SettingsService {
   constructor(
@@ -35,7 +43,7 @@ export class SettingsService {
 
     return {
       environment: this.configService.get<string>('NODE_ENV') ?? 'development',
-      appVersion: process.env.npm_package_version ?? '0.0.0',
+      appVersion: this.getAppVersion(),
       startedAt: this.appLogService.startedAt.toISOString(),
       uptimeSeconds: Math.floor(
         (Date.now() - this.appLogService.startedAt.getTime()) / 1000,
@@ -139,6 +147,7 @@ export class SettingsService {
         label: 'Application',
         entries: [
           this.entry('NODE_ENV'),
+          this.entry('APP_VERSION'),
           this.entry('APP_API_PORT', '3001'),
           this.entry('NUXT_PUBLIC_API_BASE_URL'),
           this.entry('APP_LOG_PATH', this.appLogService.getLogPath()),
@@ -210,5 +219,60 @@ export class SettingsService {
           ? `Configured (${configuredCount} group${configuredCount === 1 ? '' : 's'})`
           : 'Not set',
     };
+  }
+
+  private getAppVersion(): string {
+    const configuredVersion = this.configService
+      .get<string>('APP_VERSION')
+      ?.trim();
+
+    if (configuredVersion) {
+      return configuredVersion;
+    }
+
+    return (
+      findPackageVersion(process.cwd()) ??
+      process.env.npm_package_version ??
+      '0.0.0'
+    );
+  }
+}
+
+function findPackageVersion(startDir: string): string | null {
+  let currentDir = startDir;
+  let nearestPackageVersion: string | null = null;
+
+  while (true) {
+    const packageJson = readPackageJson(join(currentDir, 'package.json'));
+
+    if (typeof packageJson?.version === 'string') {
+      if (packageJson.name === 'acam-ts') {
+        return packageJson.version;
+      }
+
+      nearestPackageVersion ??= packageJson.version;
+    }
+
+    const parentDir = dirname(currentDir);
+
+    if (parentDir === currentDir) {
+      return nearestPackageVersion;
+    }
+
+    currentDir = parentDir;
+  }
+}
+
+function readPackageJson(packagePath: string): PackageJsonLike | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(packagePath, 'utf8'));
+
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    return parsed as PackageJsonLike;
+  } catch {
+    return null;
   }
 }
