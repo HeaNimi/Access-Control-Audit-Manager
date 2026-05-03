@@ -18,6 +18,9 @@ import type {
   SiemSourceConfig,
   SiemSourcePollResult,
   SiemNormalizationRejectCounts,
+  SiemFetchedEvent,
+  SiemFetchQueryDiagnostics,
+  SiemCursor,
 } from './siem.types';
 
 @Injectable()
@@ -177,8 +180,13 @@ export class SiemService {
     }
 
     const checkpoint = await this.checkpointRepository.getOrCreate(source);
-    let cursor = this.checkpointRepository.toCursor(checkpoint, source);
+    let pollCursor = this.checkpointRepository.toCursor(checkpoint, source);
+    let checkpointCursor: SiemCursor = {
+      ...pollCursor,
+      runtimeState: null,
+    };
     const warnings: string[] = [];
+    const queryDiagnostics: SiemFetchQueryDiagnostics[] = [];
     const normalizationRejectCounts: SiemNormalizationRejectCounts = {};
     let fetchedCount = 0;
     let storedCount = 0;
@@ -187,30 +195,30 @@ export class SiemService {
       while (true) {
         const batch = await driver.fetchBatch(
           source,
-          cursor,
+          pollCursor,
           this.getBatchSize(),
         );
-        cursor = batch.nextCursor;
+        pollCursor = batch.nextCursor;
         warnings.push(...batch.warnings);
+        if (batch.queryDiagnostics) {
+          queryDiagnostics.push(batch.queryDiagnostics);
+        }
         this.mergeRejectCounts(
           normalizationRejectCounts,
           batch.normalizationRejectCounts,
         );
 
-        fetchedCount += batch.fetchedHitCount;
+        fetchedCount += this.countFetchedBatchHits(batch);
 
         for (const event of batch.events) {
           await this.observedEventsService.ingest(event.observedEvent);
           storedCount += 1;
+          checkpointCursor = this.advanceCheckpointCursor(
+            checkpointCursor,
+            event,
+          );
 
-          cursor = {
-            ...cursor,
-            lastEventTime: event.observedEvent.eventTime,
-            lastSourceReference: event.observedEvent.sourceReference ?? null,
-            lastSort: event.sort,
-          };
-
-          await this.checkpointRepository.updateSuccess(source, cursor);
+          await this.checkpointRepository.updateSuccess(source, checkpointCursor);
         }
 
         if (!batch.hasMore) {
@@ -219,10 +227,10 @@ export class SiemService {
       }
 
       if (driver.disposeCursor) {
-        await driver.disposeCursor(source, cursor);
+        await driver.disposeCursor(source, pollCursor);
       }
 
-      await this.checkpointRepository.updateSuccess(source, cursor);
+      await this.checkpointRepository.updateSuccess(source, checkpointCursor);
 
       if (
         warnings.length > 0 ||
@@ -234,6 +242,7 @@ export class SiemService {
           storedCount,
           warnings,
           normalizationRejectCounts,
+          queryDiagnostics,
         });
       }
 
@@ -254,6 +263,7 @@ export class SiemService {
             storedCount,
             warnings,
             normalizationRejectCounts,
+            queryDiagnostics,
           },
         });
       }
@@ -270,17 +280,21 @@ export class SiemService {
           Object.keys(normalizationRejectCounts).length > 0
             ? normalizationRejectCounts
             : undefined,
-        lastEventTime: cursor.lastEventTime ?? null,
-        lastSourceReference: cursor.lastSourceReference ?? null,
+        lastEventTime: checkpointCursor.lastEventTime ?? null,
+        lastSourceReference: checkpointCursor.lastSourceReference ?? null,
       };
     } catch (error) {
       if (driver.disposeCursor) {
-        await driver.disposeCursor(source, cursor).catch(() => undefined);
+        await driver.disposeCursor(source, pollCursor).catch(() => undefined);
       }
 
       const errorMessage = toErrorMessage(error, 'SIEM poll failed.');
 
-      await this.checkpointRepository.updateError(source, errorMessage, cursor);
+      await this.checkpointRepository.updateError(
+        source,
+        errorMessage,
+        checkpointCursor,
+      );
       this.appLogService.captureException('siem', error, {
         trigger: input.trigger,
         sourceKey: source.sourceKey,
@@ -289,6 +303,7 @@ export class SiemService {
         storedCount,
         warnings,
         normalizationRejectCounts,
+        queryDiagnostics,
       });
 
       await this.auditService.write({
@@ -305,6 +320,7 @@ export class SiemService {
           driverKey: source.driverKey,
           error: errorMessage,
           normalizationRejectCounts,
+          queryDiagnostics,
         },
       });
 
@@ -320,8 +336,8 @@ export class SiemService {
           Object.keys(normalizationRejectCounts).length > 0
             ? normalizationRejectCounts
             : undefined,
-        lastEventTime: cursor.lastEventTime ?? null,
-        lastSourceReference: cursor.lastSourceReference ?? null,
+        lastEventTime: checkpointCursor.lastEventTime ?? null,
+        lastSourceReference: checkpointCursor.lastSourceReference ?? null,
         error: errorMessage,
       };
     }
@@ -370,5 +386,54 @@ export class SiemService {
       Object.values(normalizationRejectCounts).filter((count) => (count ?? 0) > 0)
         .length
     );
+  }
+
+  private countFetchedBatchHits(batch: {
+    events: SiemFetchedEvent[];
+    fetchedHitCount?: number;
+    warnings: string[];
+    normalizationRejectCounts?: SiemNormalizationRejectCounts;
+  }): number {
+    const explicitCount =
+      typeof batch.fetchedHitCount === 'number' &&
+      Number.isFinite(batch.fetchedHitCount)
+        ? batch.fetchedHitCount
+        : 0;
+    const rejectCount = Object.values(batch.normalizationRejectCounts ?? {}).reduce(
+      (sum, count) => sum + (count ?? 0),
+      0,
+    );
+    const inferredMinimum = batch.events.length + rejectCount;
+    const warningIndicatesFetchedHits = batch.warnings.some((warning) =>
+      warning.toLowerCase().includes('fetched events but none'),
+    );
+
+    return Math.max(
+      explicitCount,
+      inferredMinimum,
+      warningIndicatesFetchedHits ? 1 : 0,
+    );
+  }
+
+  private advanceCheckpointCursor(
+    cursor: SiemCursor,
+    event: SiemFetchedEvent,
+  ): SiemCursor {
+    const currentTime = cursor.lastEventTime
+      ? new Date(cursor.lastEventTime).getTime()
+      : Number.NEGATIVE_INFINITY;
+    const eventTime = new Date(event.observedEvent.eventTime).getTime();
+
+    if (Number.isNaN(eventTime) || eventTime < currentTime) {
+      return cursor;
+    }
+
+    return {
+      ...cursor,
+      lastEventTime: event.observedEvent.eventTime,
+      lastSourceReference: event.observedEvent.sourceReference ?? null,
+      lastSort: event.sort,
+      runtimeState: null,
+    };
   }
 }

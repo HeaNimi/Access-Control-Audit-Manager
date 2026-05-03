@@ -22,6 +22,7 @@ describe('ElasticWinlogbeatDriver', () => {
       sourceSystem: 'elastic-winlogbeat',
       scopeBaseDn: 'OU=ManagedObjects,DC=example,DC=local',
       initialLookbackSeconds: 3600,
+      pollOverlapSeconds: 120,
       healthLookbackSeconds: 86400,
       maxFutureSkewSeconds: 300,
     };
@@ -280,6 +281,184 @@ describe('ElasticWinlogbeatDriver', () => {
       samAccountName: 'helper.james',
       title: 'User account changed',
     });
+  });
+
+  it('applies overlap to the first page and skips stored search_after', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(Date.parse('2026-04-08T10:10:00.000Z'));
+    const directoryService = createDirectoryServiceMock();
+    const driver = new ElasticWinlogbeatDriver(directoryService);
+    const client = {
+      openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-1' }),
+      search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+      closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+    };
+
+    try {
+      jest
+        .spyOn(
+          driver as unknown as { createClient: () => typeof client },
+          'createClient',
+        )
+        .mockReturnValue(client);
+
+      const result = await driver.fetchBatch(
+        createSourceConfig(),
+        {
+          lastEventTime: '2026-04-08T10:05:00.000Z',
+          lastSort: { values: [1775642700000, 999] },
+          lastSourceReference: 'winlogbeat:event-previous',
+          runtimeState: {
+            checkpointLastEventTime: '2026-04-08T10:05:00.000Z',
+          },
+        },
+        50,
+      );
+
+      expect(client.search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          search_after: undefined,
+          query: expect.objectContaining({
+            bool: expect.objectContaining({
+              filter: expect.arrayContaining([
+                expect.objectContaining({
+                  range: {
+                    '@timestamp': expect.objectContaining({
+                      gte: '2026-04-08T10:03:00.000Z',
+                      lte: '2026-04-08T10:15:00.000Z',
+                    }),
+                  },
+                }),
+              ]),
+            }),
+          }),
+        }),
+      );
+      expect(result.queryDiagnostics).toEqual({
+        pollOverlapSeconds: 120,
+        effectiveGte: '2026-04-08T10:03:00.000Z',
+        checkpointLastEventTime: '2026-04-08T10:05:00.000Z',
+        skippedCheckpointSearchAfter: true,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('uses PIT search_after on subsequent overlap pages', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(Date.parse('2026-04-08T10:10:00.000Z'));
+    const directoryService = createDirectoryServiceMock();
+    const driver = new ElasticWinlogbeatDriver(directoryService);
+    const client = {
+      openPointInTime: jest.fn(),
+      search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+      closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+    };
+
+    try {
+      jest
+        .spyOn(
+          driver as unknown as { createClient: () => typeof client },
+          'createClient',
+        )
+        .mockReturnValue(client);
+
+      await driver.fetchBatch(
+        createSourceConfig(),
+        {
+          lastEventTime: '2026-04-08T10:05:00.000Z',
+          lastSort: { values: [1775642700000, 999] },
+          lastSourceReference: 'winlogbeat:event-previous',
+          runtimeState: {
+            pitId: 'pit-1',
+            searchAfter: { values: [1775642760000, 1000] },
+            effectiveGte: '2026-04-08T10:03:00.000Z',
+            checkpointLastEventTime: '2026-04-08T10:05:00.000Z',
+            overlapApplied: true,
+            skippedCheckpointSearchAfter: true,
+          },
+        },
+        50,
+      );
+
+      expect(client.openPointInTime).not.toHaveBeenCalled();
+      expect(client.search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          search_after: [1775642760000, 1000],
+          query: expect.objectContaining({
+            bool: expect.objectContaining({
+              filter: expect.arrayContaining([
+                expect.objectContaining({
+                  range: {
+                    '@timestamp': expect.objectContaining({
+                      gte: '2026-04-08T10:03:00.000Z',
+                    }),
+                  },
+                }),
+              ]),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('bounds future checkpoints to now before applying overlap', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(Date.parse('2026-04-08T10:10:00.000Z'));
+    const directoryService = createDirectoryServiceMock();
+    const driver = new ElasticWinlogbeatDriver(directoryService);
+    const client = {
+      openPointInTime: jest.fn().mockResolvedValue({ id: 'pit-1' }),
+      search: jest.fn().mockResolvedValue({ hits: { hits: [] } }),
+      closePointInTime: jest.fn().mockResolvedValue({ succeeded: true }),
+    };
+
+    try {
+      jest
+        .spyOn(
+          driver as unknown as { createClient: () => typeof client },
+          'createClient',
+        )
+        .mockReturnValue(client);
+
+      await driver.fetchBatch(
+        createSourceConfig(),
+        {
+          lastEventTime: '2026-04-08T10:12:00.000Z',
+          lastSort: { values: [1775643120000, 999] },
+          lastSourceReference: 'winlogbeat:event-future',
+          runtimeState: {
+            checkpointLastEventTime: '2026-04-08T10:12:00.000Z',
+          },
+        },
+        50,
+      );
+
+      expect(client.search).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.objectContaining({
+            bool: expect.objectContaining({
+              filter: expect.arrayContaining([
+                expect.objectContaining({
+                  range: {
+                    '@timestamp': expect.objectContaining({
+                      gte: '2026-04-08T10:08:00.000Z',
+                      lte: '2026-04-08T10:15:00.000Z',
+                    }),
+                  },
+                }),
+              ]),
+            }),
+          }),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('summarizes normalization reject reasons when fetched hits store no events', async () => {

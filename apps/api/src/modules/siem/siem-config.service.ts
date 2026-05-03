@@ -28,9 +28,12 @@ export class SiemConfigService {
       this.configService.get<string>('SIEM_INITIAL_LOOKBACK_SECONDS'),
       3600,
     );
-    const maxFutureSkewSeconds = readNumberConfigValue(
-      this.configService.get<string>('SIEM_MAX_FUTURE_SKEW_SECONDS'),
-      300,
+    const pollOverlapSeconds = Math.max(
+      0,
+      readNumberConfigValue(
+        this.configService.get<string>('SIEM_POLL_OVERLAP_SECONDS'),
+        120,
+      ),
     );
 
     return {
@@ -57,8 +60,9 @@ export class SiemConfigService {
         this.configService.get<string>('ELASTICSEARCH_SCOPE_BASE_DN'),
       ),
       initialLookbackSeconds,
+      pollOverlapSeconds,
       healthLookbackSeconds: Math.max(initialLookbackSeconds, 86400),
-      maxFutureSkewSeconds,
+      maxFutureSkewSeconds: pollOverlapSeconds,
     };
   }
 
@@ -97,8 +101,8 @@ export class SiemConfigService {
           String(source.initialLookbackSeconds),
         ),
         this.entry(
-          'SIEM_MAX_FUTURE_SKEW_SECONDS',
-          String(source.maxFutureSkewSeconds),
+          'SIEM_POLL_OVERLAP_SECONDS',
+          String(source.pollOverlapSeconds),
         ),
         this.entry('ELASTICSEARCH_NODE', source.node || 'Not set'),
         this.entry('ELASTICSEARCH_INDEX', source.index),

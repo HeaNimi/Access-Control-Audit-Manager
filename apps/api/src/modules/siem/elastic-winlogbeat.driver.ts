@@ -136,9 +136,23 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
     const client = this.createClient(source);
     const keepAlive = '1m';
     let pitId = cursor.runtimeState?.pitId;
+    const now = new Date();
     const maxTimestamp = new Date(
-      Date.now() + source.maxFutureSkewSeconds * 1000,
+      now.getTime() + source.maxFutureSkewSeconds * 1000,
     ).toISOString();
+    const effectiveGte =
+      cursor.runtimeState?.effectiveGte ??
+      getEffectiveQueryLowerBound(source, cursor, now);
+    const isFirstPage = !pitId;
+    const skippedCheckpointSearchAfter =
+      isFirstPage &&
+      source.pollOverlapSeconds > 0 &&
+      !!cursor.lastSort?.values.length;
+    const searchAfter = isFirstPage
+      ? skippedCheckpointSearchAfter
+        ? undefined
+        : cursor.lastSort?.values
+      : cursor.runtimeState?.searchAfter?.values;
 
     try {
       if (!pitId) {
@@ -169,18 +183,14 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
             },
           },
         ],
-        search_after: cursor.lastSort?.values,
+        search_after: searchAfter,
         query: {
           bool: {
             filter: [
               {
                 range: {
                   '@timestamp': {
-                    gte:
-                      cursor.lastEventTime ??
-                      new Date(
-                        Date.now() - source.initialLookbackSeconds * 1000,
-                      ).toISOString(),
+                    gte: effectiveGte,
                     lte: maxTimestamp,
                   },
                 },
@@ -219,20 +229,29 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
       const lastEvent = events.at(-1);
       const lastHit = hits.at(-1);
       const hasMore = hits.length === limit;
+      const highWaterCursor = advanceHighWaterCursor(
+        cursor,
+        lastEvent ?? null,
+      );
       const nextCursor: SiemCursor = {
-        lastEventTime:
-          lastEvent?.observedEvent.eventTime ?? cursor.lastEventTime,
-        lastSourceReference:
-          lastEvent?.observedEvent.sourceReference ??
-          cursor.lastSourceReference,
-        lastSort: lastHit?.sort
-          ? {
-              values: coerceSortValues(lastHit.sort),
-            }
-          : (cursor.lastSort ?? null),
+        lastEventTime: highWaterCursor.lastEventTime,
+        lastSourceReference: highWaterCursor.lastSourceReference,
+        lastSort: highWaterCursor.lastSort,
         runtimeState: hasMore
           ? {
               pitId,
+              searchAfter: lastHit?.sort
+                ? {
+                    values: coerceSortValues(lastHit.sort),
+                  }
+                : (cursor.runtimeState?.searchAfter ?? null),
+              overlapApplied: source.pollOverlapSeconds > 0,
+              effectiveGte,
+              checkpointLastEventTime:
+                cursor.runtimeState?.checkpointLastEventTime ??
+                cursor.lastEventTime ??
+                null,
+              skippedCheckpointSearchAfter,
             }
           : null,
       };
@@ -253,6 +272,15 @@ export class ElasticWinlogbeatDriver implements SiemDriver {
         hasMore,
         nextCursor,
         warnings,
+        queryDiagnostics: {
+          pollOverlapSeconds: source.pollOverlapSeconds,
+          effectiveGte,
+          checkpointLastEventTime:
+            cursor.runtimeState?.checkpointLastEventTime ??
+            cursor.lastEventTime ??
+            null,
+          skippedCheckpointSearchAfter,
+        },
         normalizationRejectCounts:
           Object.keys(normalizationRejectCounts).length > 0
             ? normalizationRejectCounts
@@ -406,4 +434,66 @@ function incrementRejectCount(
   reason: SiemNormalizationRejectReason,
 ): void {
   counts[reason] = (counts[reason] ?? 0) + 1;
+}
+
+function getEffectiveQueryLowerBound(
+  source: SiemSourceConfig,
+  cursor: SiemCursor,
+  now: Date,
+): string {
+  const initialLookbackStart = new Date(
+    now.getTime() - source.initialLookbackSeconds * 1000,
+  );
+  const checkpointTime = cursor.lastEventTime
+    ? new Date(cursor.lastEventTime)
+    : null;
+  const boundedCheckpointTime =
+    checkpointTime && !Number.isNaN(checkpointTime.getTime())
+      ? new Date(Math.min(checkpointTime.getTime(), now.getTime()))
+      : null;
+  const overlappedCheckpointTime = boundedCheckpointTime
+    ? new Date(
+        boundedCheckpointTime.getTime() - source.pollOverlapSeconds * 1000,
+      )
+    : null;
+  const lowerBound = new Date(
+    Math.max(
+      initialLookbackStart.getTime(),
+      overlappedCheckpointTime?.getTime() ?? initialLookbackStart.getTime(),
+    ),
+  );
+
+  return lowerBound.toISOString();
+}
+
+function advanceHighWaterCursor(
+  cursor: SiemCursor,
+  event: SiemFetchedEvent | null,
+): Pick<SiemCursor, 'lastEventTime' | 'lastSourceReference' | 'lastSort'> {
+  if (!event) {
+    return {
+      lastEventTime: cursor.lastEventTime,
+      lastSourceReference: cursor.lastSourceReference,
+      lastSort: cursor.lastSort ?? null,
+    };
+  }
+
+  const currentTime = cursor.lastEventTime
+    ? new Date(cursor.lastEventTime).getTime()
+    : Number.NEGATIVE_INFINITY;
+  const eventTime = new Date(event.observedEvent.eventTime).getTime();
+
+  if (Number.isNaN(eventTime) || eventTime < currentTime) {
+    return {
+      lastEventTime: cursor.lastEventTime,
+      lastSourceReference: cursor.lastSourceReference,
+      lastSort: cursor.lastSort ?? null,
+    };
+  }
+
+  return {
+    lastEventTime: event.observedEvent.eventTime,
+    lastSourceReference: event.observedEvent.sourceReference ?? null,
+    lastSort: event.sort,
+  };
 }

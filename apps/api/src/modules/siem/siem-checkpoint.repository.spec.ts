@@ -17,6 +17,7 @@ describe('SiemCheckpointRepository', () => {
     eventIds: [4720],
     sourceSystem: 'elastic-winlogbeat',
     initialLookbackSeconds: 3600,
+    pollOverlapSeconds: 120,
     healthLookbackSeconds: 86400,
     maxFutureSkewSeconds: 300,
   };
@@ -39,12 +40,14 @@ describe('SiemCheckpointRepository', () => {
       source,
     );
 
-    expect(cursor).toEqual({
-      lastEventTime: '2026-04-10T10:00:00.000Z',
-      lastSort: { values: ['2026-04-10T10:00:00.000Z', 123] },
-      lastSourceReference: 'winlogbeat:event-1',
-      runtimeState: null,
-    });
+      expect(cursor).toEqual({
+        lastEventTime: '2026-04-10T10:00:00.000Z',
+        lastSort: { values: ['2026-04-10T10:00:00.000Z', 123] },
+        lastSourceReference: 'winlogbeat:event-1',
+        runtimeState: {
+          checkpointLastEventTime: '2026-04-10T10:00:00.000Z',
+        },
+      });
   });
 
   it('rewinds poisoned future checkpoints back to the initial lookback window', () => {
@@ -73,7 +76,9 @@ describe('SiemCheckpointRepository', () => {
         lastEventTime: '2026-04-11T23:30:00.000Z',
         lastSort: null,
         lastSourceReference: null,
-        runtimeState: null,
+        runtimeState: {
+          checkpointLastEventTime: '2026-04-11T23:30:00.000Z',
+        },
       });
     } finally {
       jest.useRealTimers();

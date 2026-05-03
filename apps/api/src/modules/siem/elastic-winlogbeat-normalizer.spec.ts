@@ -18,6 +18,7 @@ describe('elastic-winlogbeat-normalizer', () => {
     sourceSystem: 'elastic-winlogbeat',
     scopeBaseDn: 'OU=ManagedObjects,DC=example,DC=local',
     initialLookbackSeconds: 3600,
+    pollOverlapSeconds: 120,
     healthLookbackSeconds: 86400,
     maxFutureSkewSeconds: 300,
   };

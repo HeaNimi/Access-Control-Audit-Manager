@@ -95,7 +95,9 @@ export class SiemCheckpointRepository {
       lastSourceReference: shouldResetPosition
         ? null
         : checkpoint.last_source_reference,
-      runtimeState: null,
+      runtimeState: {
+        checkpointLastEventTime: lastEventTime,
+      },
     };
   }
 

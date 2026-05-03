@@ -22,6 +22,7 @@ describe('SiemService poll summaries', () => {
       sourceSystem: 'elastic-winlogbeat',
       scopeBaseDn: 'OU=ManagedObjects,DC=example,DC=local',
       initialLookbackSeconds: 3600,
+      pollOverlapSeconds: 120,
       healthLookbackSeconds: 86400,
       maxFutureSkewSeconds: 300,
       ...overrides,
@@ -78,6 +79,8 @@ describe('SiemService poll summaries', () => {
       service,
       auditService,
       appLogService,
+      checkpointRepository,
+      observedEventsService,
     };
   }
 
@@ -174,5 +177,132 @@ describe('SiemService poll summaries', () => {
         trigger: 'manual',
       }),
     );
+  });
+
+  it('defensively infers fetched count for normalization warnings', async () => {
+    const source = createSource();
+    const driver: Partial<SiemDriver> = {
+      key: source.driverKey,
+      fetchBatch: jest.fn().mockResolvedValue({
+        events: [],
+        fetchedHitCount: 0,
+        hasMore: false,
+        nextCursor: {
+          lastEventTime: '2026-04-08T04:00:00.000Z',
+          lastSourceReference: null,
+          lastSort: null,
+          runtimeState: null,
+        },
+        warnings: [
+          'Fetched events but none could be normalized into observed events.',
+        ],
+      }),
+      disposeCursor: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, auditService, appLogService } = createService({
+      source,
+      driver,
+    });
+
+    const summary = await service.pollConfiguredSources({
+      trigger: 'manual',
+      force: true,
+      actor: null,
+    });
+
+    expect(summary.sourceResults[0]).toMatchObject({
+      fetchedCount: 1,
+      storedCount: 0,
+      warningCount: 1,
+      warnings: [
+        'Fetched events but none could be normalized into observed events.',
+      ],
+    });
+    expect(appLogService.warning).toHaveBeenCalledWith(
+      'siem',
+      'SIEM poll completed with warnings.',
+      expect.objectContaining({
+        fetchedCount: 1,
+        storedCount: 0,
+        warnings: [
+          'Fetched events but none could be normalized into observed events.',
+        ],
+      }),
+    );
+    expect(auditService.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventDetails: expect.objectContaining({
+          fetchedCount: 1,
+          storedCount: 0,
+          warnings: [
+            'Fetched events but none could be normalized into observed events.',
+          ],
+        }),
+      }),
+    );
+  });
+
+  it('does not move the checkpoint backwards for overlapped duplicate events', async () => {
+    const source = createSource();
+    const driver: Partial<SiemDriver> = {
+      key: source.driverKey,
+      fetchBatch: jest.fn().mockResolvedValue({
+        events: [
+          {
+            observedEvent: {
+              eventSource: 'active_directory',
+              sourceSystem: 'elastic-winlogbeat',
+              sourceReference:
+                '.ds-winlogbeat-9.3.2-2026.04.06-000002:event-overlap',
+              eventId: 4738,
+              eventTime: '2026-04-08T03:59:30.000Z',
+              eventType: 'account_update',
+              title: 'User account changed',
+              message: 'A user account was changed.',
+              objectGuid: null,
+              distinguishedName: null,
+              samAccountName: 'helper.james',
+              subjectAccountName: null,
+              payload: {},
+            },
+            sort: { values: [1775617170000, 1] },
+          },
+        ],
+        fetchedHitCount: 1,
+        hasMore: false,
+        nextCursor: {
+          lastEventTime: '2026-04-08T04:00:00.000Z',
+          lastSourceReference: null,
+          lastSort: null,
+          runtimeState: null,
+        },
+        warnings: [],
+      }),
+      disposeCursor: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, checkpointRepository } = createService({
+      source,
+      driver,
+    });
+
+    await service.pollConfiguredSources({
+      trigger: 'manual',
+      force: true,
+      actor: null,
+    });
+
+    expect(checkpointRepository.updateSuccess).toHaveBeenCalledWith(
+      source,
+      expect.objectContaining({
+        lastEventTime: '2026-04-08T04:00:00.000Z',
+        lastSourceReference: null,
+        lastSort: null,
+      }),
+    );
+    expect(
+      checkpointRepository.updateSuccess.mock.calls.some(
+        ([, cursor]) => cursor.lastEventTime === '2026-04-08T03:59:30.000Z',
+      ),
+    ).toBe(false);
   });
 });

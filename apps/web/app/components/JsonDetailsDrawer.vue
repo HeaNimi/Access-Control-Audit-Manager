@@ -16,6 +16,8 @@ const emit = defineEmits<{
 }>();
 
 const drawerContentElement = ref<HTMLElement | null>(null);
+const copiedSectionLabel = ref<string | null>(null);
+let copiedResetTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const openModel = computed({
   get: () => props.open,
@@ -48,6 +50,36 @@ const drawerContentProps = {
   onPointerDownOutside: handlePointerDownOutside,
   onInteractOutside: handleInteractOutside,
 };
+
+function stringifyJson(value: unknown) {
+  return JSON.stringify(value, null, 2);
+}
+
+async function copySectionJson(section: { label: string; value: unknown }) {
+  const content = stringifyJson(section.value);
+
+  if (copiedResetTimeout) {
+    clearTimeout(copiedResetTimeout);
+    copiedResetTimeout = null;
+  }
+
+  try {
+    await navigator.clipboard.writeText(content);
+    copiedSectionLabel.value = section.label;
+    copiedResetTimeout = setTimeout(() => {
+      copiedSectionLabel.value = null;
+      copiedResetTimeout = null;
+    }, 1800);
+  } catch {
+    copiedSectionLabel.value = null;
+  }
+}
+
+onBeforeUnmount(() => {
+  if (copiedResetTimeout) {
+    clearTimeout(copiedResetTimeout);
+  }
+});
 </script>
 
 <template>
@@ -94,9 +126,34 @@ const drawerContentProps = {
             :title="section.label"
             variant="subtle"
           >
-            <pre class="json-block">{{
-              JSON.stringify(section.value, null, 2)
-            }}</pre>
+            <template #header>
+              <div class="flex items-center justify-between gap-3">
+                <h4 class="text-sm font-semibold text-highlighted">
+                  {{ section.label }}
+                </h4>
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  :icon="
+                    copiedSectionLabel === section.label
+                      ? 'i-lucide-check'
+                      : 'i-lucide-copy'
+                  "
+                  :aria-label="`Copy ${section.label} JSON`"
+                  :title="
+                    copiedSectionLabel === section.label
+                      ? 'Copied'
+                      : 'Copy JSON'
+                  "
+                  @click="copySectionJson(section)"
+                >
+                  {{ copiedSectionLabel === section.label ? "Copied" : "Copy" }}
+                </UButton>
+              </div>
+            </template>
+
+            <pre class="json-block">{{ stringifyJson(section.value) }}</pre>
           </UPageCard>
         </div>
       </div>

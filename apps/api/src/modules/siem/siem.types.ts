@@ -13,6 +13,11 @@ export interface SiemSortState {
 
 export interface SiemRuntimeCursorState {
   pitId?: string;
+  searchAfter?: SiemSortState | null;
+  overlapApplied?: boolean;
+  effectiveGte?: string;
+  checkpointLastEventTime?: string | null;
+  skippedCheckpointSearchAfter?: boolean;
 }
 
 export interface SiemCursor {
@@ -34,6 +39,7 @@ export interface SiemSourceConfig {
   sourceSystem: string;
   scopeBaseDn?: string;
   initialLookbackSeconds: number;
+  pollOverlapSeconds: number;
   healthLookbackSeconds: number;
   maxFutureSkewSeconds: number;
 }
@@ -49,7 +55,15 @@ export interface SiemFetchResult {
   hasMore: boolean;
   nextCursor: SiemCursor;
   warnings: string[];
+  queryDiagnostics?: SiemFetchQueryDiagnostics;
   normalizationRejectCounts?: SiemNormalizationRejectCounts;
+}
+
+export interface SiemFetchQueryDiagnostics {
+  pollOverlapSeconds: number;
+  effectiveGte: string;
+  checkpointLastEventTime: string | null;
+  skippedCheckpointSearchAfter: boolean;
 }
 
 export type { SiemNormalizationRejectCounts, SiemNormalizationRejectReason };
