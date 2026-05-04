@@ -75,6 +75,59 @@ describe('elastic-winlogbeat-normalizer', () => {
     });
   });
 
+  it('ignores AD placeholder fields when normalizing account change targets', async () => {
+    const resolveAccountDistinguishedNameBySamAccountName = jest
+      .fn()
+      .mockImplementation((samAccountName: string | undefined) =>
+        samAccountName === 'test.user10'
+          ? 'CN=test user10,OU=Users,OU=ManagedObjects,DC=example,DC=local'
+          : null,
+      );
+    const normalized = await normalizeElasticWinlogbeatHit({
+      source,
+      cursor: {
+        lastEventTime: '2026-05-04T20:00:00.000Z',
+        lastSourceReference: null,
+        lastSort: null,
+        runtimeState: null,
+      },
+      resolveSamAccountNameFromDistinguishedName: jest.fn(),
+      resolveAccountDistinguishedNameBySamAccountName,
+      resolveGroupDistinguishedNameBySamAccountName: jest.fn(),
+      hit: {
+        _index: '.ds-winlogbeat-9.3.2-2026.04.11-000004',
+        _id: 'FP2i9J0BwpGJTuBUHs1E',
+        _source: {
+          '@timestamp': '2026-05-04T20:15:47.037Z',
+          ecs: { version: '8.0.0' },
+          event: { code: '4738' },
+          message: 'A user account was changed.',
+          winlog: {
+            channel: 'Security',
+            event_id: '4738',
+            provider_name: 'Microsoft-Windows-Security-Auditing',
+            event_data: {
+              TargetSid: 'S-1-5-21-4013827353-799469157-2647928806-1146',
+              SamAccountName: '-',
+              TargetUserName: 'test.user10',
+              AccountExpires: '7/27/2026 11:15:00 PM',
+            },
+          },
+        },
+      },
+    });
+
+    expect(resolveAccountDistinguishedNameBySamAccountName).toHaveBeenCalledWith(
+      'test.user10',
+    );
+    expect(expectNormalized(normalized).observedEvent).toMatchObject({
+      eventId: 4738,
+      eventType: 'account_update',
+      samAccountName: 'test.user10',
+      title: 'User account changed',
+    });
+  });
+
   it('uses directory resolution for membership member DNs with CN fallback', async () => {
     const resolveSamAccountNameFromDistinguishedName = jest
       .fn()

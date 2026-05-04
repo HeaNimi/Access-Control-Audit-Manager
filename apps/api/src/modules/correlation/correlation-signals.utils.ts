@@ -64,6 +64,7 @@ const USER_CREATE_SIGNAL = 'user.create';
 const ACCOUNT_ENABLE_SIGNAL = 'account.enable';
 const ACCOUNT_DISABLE_SIGNAL = 'account.disable';
 const ACCOUNT_RENAME_SIGNAL = 'account.rename';
+const ACCOUNT_PASSWORD_SIGNAL = 'account.password';
 
 export function getExpectedEventIds(
   requestType: string,
@@ -74,6 +75,9 @@ export function getExpectedEventIds(
       return uniqueNumbers([
         4720,
         5137,
+        ...(payload?.kind === 'user_create' && payload.target.password
+          ? [4723, 4724]
+          : []),
         ...(payload?.kind === 'user_create' && (payload.target.enabled ?? true)
           ? [4722, 4738, 5136]
           : []),
@@ -417,6 +421,7 @@ function getExpectedUserCreateSignals(
 ): string[] {
   const plannedSignals = uniqueSignals([
     USER_CREATE_SIGNAL,
+    ...(payload.target.password ? [ACCOUNT_PASSWORD_SIGNAL] : []),
     ...((payload.target.enabled ?? true) ? [ACCOUNT_ENABLE_SIGNAL] : []),
     ...(payload.initialGroups ?? []).map((group) =>
       getGroupSignalKey('add', group),
@@ -436,6 +441,12 @@ function getExpectedUserCreateSignals(
     if (step.name === 'create-user') {
       recognizedExecution = true;
       signals.push(USER_CREATE_SIGNAL);
+      continue;
+    }
+
+    if (step.name === 'set-password') {
+      recognizedExecution = true;
+      signals.push(ACCOUNT_PASSWORD_SIGNAL);
       continue;
     }
 
@@ -593,14 +604,13 @@ function getUserCreateSignalsForEvent(
   }
 
   if (
-    expectedSignals.has(ACCOUNT_ENABLE_SIGNAL) &&
     isAccountAttributeEvent(event) &&
     matchesRequestTarget(event, request, payload, executionResult)
   ) {
-    if (
-      getAccountSignalsFromObservedEvent(event).includes(ACCOUNT_ENABLE_SIGNAL)
-    ) {
-      signals.push(ACCOUNT_ENABLE_SIGNAL);
+    for (const signal of getAccountSignalsFromObservedEvent(event)) {
+      if (expectedSignals.has(signal)) {
+        signals.push(signal);
+      }
     }
   }
 
@@ -822,6 +832,9 @@ function getDiagnosticMismatchReasons(
 
 function getAccountSignalsFromObservedEvent(event: ObservedEventRow): string[] {
   switch (event.event_id) {
+    case 4723:
+    case 4724:
+      return [ACCOUNT_PASSWORD_SIGNAL];
     case 4722:
       return [ACCOUNT_ENABLE_SIGNAL];
     case 4725:
@@ -1095,35 +1108,36 @@ function getEventTargetReference(event: ObservedEventRow): DirectoryRefLike {
 
   return {
     objectGuid:
-      event.object_guid ??
-      readString(eventData.ObjectGUID) ??
-      readString(eventData.ObjectGuid),
+      readMeaningfulString(event.object_guid) ??
+      readMeaningfulString(eventData.ObjectGUID) ??
+      readMeaningfulString(eventData.ObjectGuid),
     objectSid:
-      readString(eventData.TargetSid) ?? readString(eventData.ObjectSid),
+      readMeaningfulString(eventData.TargetSid) ??
+      readMeaningfulString(eventData.ObjectSid),
     distinguishedName:
-      event.distinguished_name ??
-      readString(eventData.ObjectDN) ??
-      readString(eventData.TargetDn),
+      readMeaningfulString(event.distinguished_name) ??
+      readMeaningfulString(eventData.ObjectDN) ??
+      readMeaningfulString(eventData.TargetDn),
     samAccountName:
-      event.sam_account_name ??
-      readString(eventData.TargetUserName) ??
-      readString(eventData.SamAccountName) ??
-      readString(eventData.OldTargetUserName) ??
-      readString(eventData.NewTargetUserName),
-    displayName: readString(eventData.DisplayName),
+      readMeaningfulString(event.sam_account_name) ??
+      readMeaningfulString(eventData.TargetUserName) ??
+      readMeaningfulString(eventData.SamAccountName) ??
+      readMeaningfulString(eventData.OldTargetUserName) ??
+      readMeaningfulString(eventData.NewTargetUserName),
+    displayName: readMeaningfulString(eventData.DisplayName),
   };
 }
 
 function getEventMemberReference(event: ObservedEventRow): DirectoryRefLike {
   const eventData = getObservedEventData(event);
-  const distinguishedName = readString(eventData.MemberName);
+  const distinguishedName = readMeaningfulString(eventData.MemberName);
 
   return {
-    objectSid: readString(eventData.MemberSid),
+    objectSid: readMeaningfulString(eventData.MemberSid),
     distinguishedName,
     samAccountName:
-      event.subject_account_name ??
-      readString(eventData.MemberSamAccountName) ??
+      readMeaningfulString(event.subject_account_name) ??
+      readMeaningfulString(eventData.MemberSamAccountName) ??
       extractCnFromDistinguishedName(distinguishedName),
   };
 }

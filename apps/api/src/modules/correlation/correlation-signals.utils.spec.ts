@@ -86,6 +86,91 @@ describe('correlation-signals.utils', () => {
     ]);
   });
 
+  it('correlates password reset events for passworded user creation', () => {
+    const request = {
+      ...baseRequest,
+      request_type: 'user_create',
+    } as ChangeRequestRow;
+    const payload: UserCreatePayload = {
+      kind: 'user_create',
+      target: {
+        samAccountName: 'helper.james',
+        displayName: 'helper james',
+        givenName: 'helper',
+        surname: 'james',
+        objectSid: baseRequest.target_object_sid,
+        password: 'Temporary-Password-123!',
+      },
+    };
+    const observed = event(
+      {
+        event_id: 4724,
+        event_type: 'password_reset',
+        distinguished_name:
+          'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+        sam_account_name: 'helper.james',
+      },
+      {
+        TargetUserName: 'helper.james',
+        TargetSid: baseRequest.target_object_sid,
+      },
+    );
+
+    expect(getExpectedEventIds('user_create', payload)).toEqual([
+      4720, 5137, 4723, 4724, 4722, 4738, 5136,
+    ]);
+    expect(getExpectedCorrelationSignals(payload)).toEqual([
+      'user.create',
+      'account.password',
+      'account.enable',
+    ]);
+    expect(getCorrelationSignalsForEvent(observed, request, payload)).toEqual([
+      'account.password',
+    ]);
+    expect(doesObservedEventMatchRequest(observed, request, payload)).toBe(
+      true,
+    );
+  });
+
+  it('uses completed set-password execution steps for user creation expectations', () => {
+    const payload: UserCreatePayload = {
+      kind: 'user_create',
+      target: {
+        samAccountName: 'helper.james',
+        displayName: 'helper james',
+        givenName: 'helper',
+        surname: 'james',
+        password: 'Temporary-Password-123!',
+      },
+    };
+    const executionResult = {
+      mode: 'ldap',
+      steps: [
+        {
+          name: 'create-user',
+          status: 'completed',
+          detail: {
+            distinguishedName:
+              'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+          },
+        },
+        {
+          name: 'set-password',
+          status: 'completed',
+          detail: {
+            distinguishedName:
+              'CN=helper james,OU=Users,OU=ManagedObjects,DC=example,DC=local',
+          },
+        },
+      ],
+    };
+
+    expect(getExpectedCorrelationSignals(payload, executionResult)).toEqual([
+      'user.create',
+      'account.password',
+    ]);
+  });
+
   it('does not require an enable signal when a new user is created disabled', () => {
     const payload: UserCreatePayload = {
       kind: 'user_create',
@@ -345,6 +430,49 @@ describe('correlation-signals.utils', () => {
     expect(
       getCorrelationSignalsForEvent(observed, baseRequest, payload),
     ).toEqual(['account.attr:displayName', 'account.disable']);
+  });
+
+  it('matches 4738 account expiry changes when SamAccountName is an AD placeholder', () => {
+    const request = {
+      ...baseRequest,
+      target_object_guid: null,
+      target_object_sid: null,
+      target_distinguished_name: null,
+      target_sam_account_name: 'test.user10',
+    } as ChangeRequestRow;
+    const payload: AccountChangePayload = {
+      kind: 'account_change',
+      target: {
+        samAccountName: 'test.user10',
+      },
+      changes: [
+        {
+          attribute: 'accountExpiresAt',
+          previousValue: null,
+          nextValue: '2026-07-27T20:15:00.000Z',
+        },
+      ],
+    };
+    const observed = event(
+      {
+        event_id: 4738,
+        event_type: 'account_update',
+        sam_account_name: '-',
+      },
+      {
+        TargetSid: 'S-1-5-21-4013827353-799469157-2647928806-1146',
+        TargetUserName: 'test.user10',
+        SamAccountName: '-',
+        AccountExpires: '7/27/2026 11:15:00 PM',
+      },
+    );
+
+    expect(getCorrelationSignalsForEvent(observed, request, payload)).toEqual([
+      'account.attr:accountExpires',
+    ]);
+    expect(doesObservedEventMatchRequest(observed, request, payload)).toBe(
+      true,
+    );
   });
 
   it('filters expected signals to completed execution steps when execution data exists', () => {

@@ -1,12 +1,12 @@
 export const ELASTIC_WINLOGBEAT_DRIVER_KEY = 'elastic-winlogbeat';
 
 export const DEFAULT_SIEM_EVENT_IDS = [
-  4720, 4722, 4723, 4724, 4725, 4726, 4728, 4729, 4732, 4733, 4738, 4740,
-  4756, 4757, 4767, 4781, 5136, 5137,
+  4720, 4722, 4723, 4724, 4725, 4726, 4728, 4729, 4732, 4733, 4738, 4740, 4756,
+  4757, 4767, 4781, 5136, 5137,
 ] as const;
 
 export const ACCOUNT_ATTRIBUTE_EVENT_IDS = new Set<number>([
-  4722, 4725, 4738, 4781, 5136,
+  4722, 4723, 4724, 4725, 4738, 4781, 5136,
 ]);
 export const GROUP_ADD_EVENT_IDS = new Set<number>([4728, 4732, 4756]);
 export const GROUP_REMOVE_EVENT_IDS = new Set<number>([4729, 4733, 4757]);

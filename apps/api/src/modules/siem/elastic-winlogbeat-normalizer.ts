@@ -96,27 +96,31 @@ export async function normalizeElasticWinlogbeatHit(input: {
   }
 
   const eventData = rawSource.winlog?.event_data ?? {};
-  const memberDistinguishedName = readString(eventData.MemberName);
+  const memberDistinguishedName = readMeaningfulString(eventData.MemberName);
   const memberSamAccountName =
-    readString(eventData.MemberSamAccountName) ??
-    (await input.resolveSamAccountNameFromDistinguishedName(
-      memberDistinguishedName,
-    )) ??
+    readMeaningfulString(eventData.MemberSamAccountName) ??
+    (memberDistinguishedName
+      ? await input.resolveSamAccountNameFromDistinguishedName(
+          memberDistinguishedName,
+        )
+      : null) ??
     extractCnFromDistinguishedName(memberDistinguishedName);
   const isMembershipEvent =
     isGroupAddEvent(eventId) || isGroupRemoveEvent(eventId);
   const samAccountName = isMembershipEvent
-    ? (readString(eventData.TargetUserName) ??
-      rawSource.group?.name ??
-      readString(eventData.GroupName))
-    : (readString(eventData.SamAccountName) ??
-      readString(eventData.TargetUserName) ??
-      rawSource.user?.name);
+    ? (readMeaningfulString(eventData.TargetUserName) ??
+      readMeaningfulString(rawSource.group?.name) ??
+      readMeaningfulString(eventData.GroupName))
+    : (readMeaningfulString(eventData.SamAccountName) ??
+      readMeaningfulString(eventData.TargetUserName) ??
+      readMeaningfulString(rawSource.user?.name));
   const distinguishedName = isMembershipEvent
-    ? (readString(eventData.ObjectDN) ?? readString(eventData.TargetDn))
-    : readString(eventData.ObjectDN);
+    ? (readMeaningfulString(eventData.ObjectDN) ??
+      readMeaningfulString(eventData.TargetDn))
+    : readMeaningfulString(eventData.ObjectDN);
   const objectGuid =
-    readString(eventData.ObjectGUID) ?? readString(eventData.ObjectGuid);
+    readMeaningfulString(eventData.ObjectGUID) ??
+    readMeaningfulString(eventData.ObjectGuid);
   const scopeMatch = await isEventWithinScope({
     source: input.source,
     eventId,
@@ -186,12 +190,12 @@ function buildMessage(source: ElasticHitSource, eventId: number): string {
 
   if (isGroupAddEvent(eventId) || isGroupRemoveEvent(eventId)) {
     const memberName =
-      readString(source.winlog?.event_data?.MemberName) ??
-      source.user?.name ??
+      readMeaningfulString(source.winlog?.event_data?.MemberName) ??
+      readMeaningfulString(source.user?.name) ??
       'unknown member';
     const groupName =
-      readString(source.winlog?.event_data?.TargetUserName) ??
-      source.group?.name ??
+      readMeaningfulString(source.winlog?.event_data?.TargetUserName) ??
+      readMeaningfulString(source.group?.name) ??
       'unknown group';
 
     return `${baseMessage}\n\nNormalized target group: ${groupName}\nNormalized member: ${memberName}`;
@@ -204,6 +208,16 @@ function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : undefined;
+}
+
+function readMeaningfulString(value: unknown): string | undefined {
+  const normalized = readString(value);
+
+  if (!normalized || normalized === '-') {
+    return undefined;
+  }
+
+  return normalized;
 }
 
 async function isEventWithinScope(input: {
