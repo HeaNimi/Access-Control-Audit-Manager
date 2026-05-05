@@ -132,6 +132,97 @@ describe('correlation-signals.utils', () => {
     );
   });
 
+  it('matches 4738 PasswordLastSet changes for passworded user creation', () => {
+    const request = {
+      ...baseRequest,
+      request_type: 'user_create',
+    } as ChangeRequestRow;
+    const payload: UserCreatePayload = {
+      kind: 'user_create',
+      target: {
+        samAccountName: 'helper.james',
+        displayName: 'helper james',
+        givenName: 'helper',
+        surname: 'james',
+        objectSid: baseRequest.target_object_sid,
+        password: 'Temporary-Password-123!',
+      },
+    };
+    const observed = event(
+      {
+        event_id: 4738,
+        event_type: 'account_update',
+        sam_account_name: '-',
+      },
+      {
+        TargetUserName: 'helper.james',
+        TargetSid: baseRequest.target_object_sid,
+        SamAccountName: '-',
+        DisplayName: '-',
+        UserPrincipalName: '-',
+        AccountExpires: '-',
+        PasswordLastSet: '5/5/2026 11:36:03 PM',
+        NewUacValue: '-',
+      },
+    );
+
+    expect(getCorrelationSignalsForEvent(observed, request, payload)).toEqual([
+      'account.password',
+    ]);
+    expect(evaluateObservedEventForRequest(observed, request, payload)).toEqual(
+      {
+        matches: true,
+        reasonCodes: ['matched'],
+        detectedSignals: ['account.password'],
+        matchedSignals: ['account.password'],
+      },
+    );
+  });
+
+  it('ignores placeholder-only 4738 PasswordLastSet values', () => {
+    const request = {
+      ...baseRequest,
+      request_type: 'user_create',
+    } as ChangeRequestRow;
+    const payload: UserCreatePayload = {
+      kind: 'user_create',
+      target: {
+        samAccountName: 'helper.james',
+        displayName: 'helper james',
+        givenName: 'helper',
+        surname: 'james',
+        objectSid: baseRequest.target_object_sid,
+        password: 'Temporary-Password-123!',
+      },
+    };
+    const observed = event(
+      {
+        event_id: 4738,
+        event_type: 'account_update',
+        sam_account_name: '-',
+      },
+      {
+        TargetUserName: 'helper.james',
+        TargetSid: baseRequest.target_object_sid,
+        SamAccountName: '-',
+        DisplayName: '-',
+        UserPrincipalName: '-',
+        AccountExpires: '-',
+        PasswordLastSet: '-',
+        NewUacValue: '-',
+      },
+    );
+
+    expect(evaluateObservedEventForRequest(observed, request, payload)).toEqual(
+      {
+        matches: false,
+        reasonCodes: ['no_signal_detected'],
+        detectedSignals: [],
+        matchedSignals: [],
+      },
+    );
+  });
+
   it('uses completed set-password execution steps for user creation expectations', () => {
     const payload: UserCreatePayload = {
       kind: 'user_create',

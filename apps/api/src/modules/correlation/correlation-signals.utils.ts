@@ -875,6 +875,10 @@ function getSignalsFrom4738Event(event: ObservedEventRow): string[] {
     signals.push(toAccountAttributeSignal('accountExpires'));
   }
 
+  if (readMeaningfulString(eventData.PasswordLastSet)) {
+    signals.push(ACCOUNT_PASSWORD_SIGNAL);
+  }
+
   const newUacValue = parseUserAccountControlValue(eventData.NewUacValue);
 
   if (newUacValue !== null) {
