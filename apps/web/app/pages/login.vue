@@ -55,6 +55,10 @@ onMounted(() => {
 
 <template>
   <div class="flex min-h-screen items-center justify-center px-4 py-10">
+    <div class="absolute right-4 top-4 sm:right-6 sm:top-6">
+      <ColorModeControl />
+    </div>
+
     <UCard class="w-full max-w-xl">
       <template #header>
         <div class="space-y-2">

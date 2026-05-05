@@ -256,6 +256,8 @@ function signOut() {
 
           <template #trailing>
             <div class="hidden items-center gap-2 sm:flex">
+              <ColorModeControl />
+
               <UBadge
                 v-for="role in user.roles.slice(0, 2)"
                 :key="role"
