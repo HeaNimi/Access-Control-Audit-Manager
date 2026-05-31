@@ -39,6 +39,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { CorrelationService } from '../correlation/correlation.service';
 import { DirectoryService } from '../directory/directory.service';
+import { UserCreationTemplatesService } from '../user-creation-templates/user-creation-templates.service';
 import { ApprovalDecisionDto } from './dto/approval-decision.dto';
 import { CreateChangeRequestDto } from './dto/create-change-request.dto';
 import {
@@ -57,13 +58,16 @@ export class RequestsService {
     private readonly correlationService: CorrelationService,
     private readonly readModelService: ReadModelService,
     private readonly appLogService: AppLogService,
+    private readonly userCreationTemplatesService: UserCreationTemplatesService,
   ) {}
 
   async create(
     dto: CreateChangeRequestDto,
     actor: AuthenticatedUser,
   ): Promise<ChangeRequestDetail> {
-    const initialPayload = this.safeParsePayload(dto.payload);
+    const initialPayload = await this.canonicalizeUserCreationTemplate(
+      this.safeParsePayload(dto.payload),
+    );
     const approver = await this.authService.resolveApproverByUsername(
       dto.approverUsername,
     );
@@ -124,6 +128,9 @@ export class RequestsService {
       eventDetails: {
         requestNumber: request.request_number,
         requestType: request.request_type,
+        ...(initialPayload.kind === 'user_create' && initialPayload.template
+          ? { template: initialPayload.template }
+          : {}),
       },
     });
     this.appLogService.info('requests', 'Change request submitted.', {
@@ -132,6 +139,9 @@ export class RequestsService {
       requestType: request.request_type,
       actorUsername: actor.username,
       approverUsername: dto.approverUsername,
+      ...(initialPayload.kind === 'user_create' && initialPayload.template
+        ? { template: initialPayload.template }
+        : {}),
     });
 
     return this.getDetail(request.request_id, actor);
@@ -292,13 +302,17 @@ export class RequestsService {
         previousErrorMessage: execution.error_message,
       },
     });
-    this.appLogService.warning('requests', 'Directory execution retry requested.', {
-      requestId,
-      executionId: execution.execution_id,
-      actorUsername: actor.username,
-      previousExecutionStatus: execution.execution_status,
-      previousErrorMessage: execution.error_message,
-    });
+    this.appLogService.warning(
+      'requests',
+      'Directory execution retry requested.',
+      {
+        requestId,
+        executionId: execution.execution_id,
+        actorUsername: actor.username,
+        previousExecutionStatus: execution.execution_status,
+        previousErrorMessage: execution.error_message,
+      },
+    );
 
     await this.executeApprovedRequest(requestId);
 
@@ -332,8 +346,7 @@ export class RequestsService {
     actor: AuthenticatedUser,
   ): Promise<CorrelationDiagnosticsView> {
     await this.getVisibleRequestByIdOrThrow(requestId, actor);
-    const diagnostics =
-      await this.correlationService.getDiagnostics(requestId);
+    const diagnostics = await this.correlationService.getDiagnostics(requestId);
 
     if (!diagnostics) {
       throw new NotFoundException('Change request not found.');
@@ -837,6 +850,24 @@ export class RequestsService {
         ...payload.target,
         description: nextDescription,
       },
+    };
+  }
+
+  private async canonicalizeUserCreationTemplate(
+    payload: ChangeRequestPayload,
+  ): Promise<ChangeRequestPayload> {
+    if (payload.kind !== 'user_create' || !payload.template?.templateId) {
+      return payload;
+    }
+
+    const template =
+      await this.userCreationTemplatesService.resolveActiveReference(
+        payload.template.templateId,
+      );
+
+    return {
+      ...payload,
+      template,
     };
   }
 }

@@ -6,6 +6,7 @@ import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { CorrelationModule } from '../correlation/correlation.module';
 import { DirectoryModule } from '../directory/directory.module';
+import { UserCreationTemplatesModule } from '../user-creation-templates/user-creation-templates.module';
 import { RequestsController } from './requests.controller';
 import { RequestsService } from './requests.service';
 
@@ -17,6 +18,7 @@ import { RequestsService } from './requests.service';
     AuditModule,
     DirectoryModule,
     CorrelationModule,
+    UserCreationTemplatesModule,
   ],
   controllers: [RequestsController],
   providers: [RequestsService],

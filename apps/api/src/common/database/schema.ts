@@ -147,6 +147,37 @@ export interface SiemSourceCheckpointTable {
   updated_at: Generated<Date>;
 }
 
+export interface UserCreationTemplateTable {
+  template_id: Generated<string>;
+  template_name: string;
+  description: string | null;
+  is_active: Generated<boolean>;
+  sort_order: Generated<number>;
+  template_version: Generated<number>;
+  ou_distinguished_name: string | null;
+  enabled_default: boolean | null;
+  account_expires_offset_days: number | null;
+  description_template: string | null;
+  upn_suffix: string | null;
+  mail_domain: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface UserCreationTemplateGroupTable {
+  template_group_id: Generated<string>;
+  template_id: string;
+  group_distinguished_name: string;
+  group_sam_account_name: string | null;
+  group_display_name: string | null;
+  group_object_guid: string | null;
+  group_object_sid: string | null;
+  sort_order: Generated<number>;
+  created_at: Generated<Date>;
+}
+
 export interface DatabaseSchema {
   system_user: SystemUserTable;
   role: RoleTable;
@@ -158,6 +189,8 @@ export interface DatabaseSchema {
   observed_event: ObservedEventTable;
   event_correlation: EventCorrelationTable;
   siem_source_checkpoint: SiemSourceCheckpointTable;
+  user_creation_template: UserCreationTemplateTable;
+  user_creation_template_group: UserCreationTemplateGroupTable;
 }
 
 export type SystemUserRow = Selectable<SystemUserTable>;
@@ -168,6 +201,9 @@ export type AuditLogRow = Selectable<AuditLogTable>;
 export type ObservedEventRow = Selectable<ObservedEventTable>;
 export type EventCorrelationRow = Selectable<EventCorrelationTable>;
 export type SiemSourceCheckpointRow = Selectable<SiemSourceCheckpointTable>;
+export type UserCreationTemplateRow = Selectable<UserCreationTemplateTable>;
+export type UserCreationTemplateGroupRow =
+  Selectable<UserCreationTemplateGroupTable>;
 
 export type NewSystemUser = Insertable<SystemUserTable>;
 export type NewChangeRequest = Insertable<ChangeRequestTable>;
@@ -177,8 +213,12 @@ export type NewAuditLog = Insertable<AuditLogTable>;
 export type NewObservedEvent = Insertable<ObservedEventTable>;
 export type NewEventCorrelation = Insertable<EventCorrelationTable>;
 export type NewSiemSourceCheckpoint = Insertable<SiemSourceCheckpointTable>;
+export type NewUserCreationTemplate = Insertable<UserCreationTemplateTable>;
+export type NewUserCreationTemplateGroup =
+  Insertable<UserCreationTemplateGroupTable>;
 
 export type ChangeRequestUpdate = Updateable<ChangeRequestTable>;
 export type RequestApprovalUpdate = Updateable<RequestApprovalTable>;
 export type RequestExecutionUpdate = Updateable<RequestExecutionTable>;
 export type SiemSourceCheckpointUpdate = Updateable<SiemSourceCheckpointTable>;
+export type UserCreationTemplateUpdate = Updateable<UserCreationTemplateTable>;

@@ -5,7 +5,11 @@ import type {
   DirectoryObjectRef,
 } from "./directory";
 import type { AuditLogView } from "./audit";
-import type { EventCorrelationView, ObservedEventView } from "./observed-events";
+import type {
+  EventCorrelationView,
+  ObservedEventView,
+} from "./observed-events";
+import type { UserCreationTemplateReference } from "./user-creation-templates";
 
 export const REQUEST_TYPES = [
   "user_create",
@@ -40,6 +44,7 @@ export type CorrelationState = (typeof CORRELATION_STATES)[number];
 
 export interface UserCreatePayload {
   kind: "user_create";
+  template?: UserCreationTemplateReference;
   target: DirectoryObjectRef & {
     samAccountName: string;
     displayName: string;

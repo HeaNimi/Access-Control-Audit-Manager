@@ -15,6 +15,7 @@ import { ObservedEventsModule } from './modules/observed-events/observed-events.
 import { RequestsModule } from './modules/requests/requests.module';
 import { SiemModule } from './modules/siem/siem.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { UserCreationTemplatesModule } from './modules/user-creation-templates/user-creation-templates.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SettingsModule } from './modules/settings/settings.module';
     RequestsModule,
     ObservedEventsModule,
     SiemModule,
+    UserCreationTemplatesModule,
     SettingsModule,
   ],
 })

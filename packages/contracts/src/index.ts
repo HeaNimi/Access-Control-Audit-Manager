@@ -5,5 +5,6 @@ export * from "./requests";
 export * from "./audit";
 export * from "./observed-events";
 export * from "./settings";
+export * from "./user-creation-templates";
 export * from "./execution";
 export * from "./siem";

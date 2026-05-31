@@ -4,6 +4,7 @@ import type {
   AuthUserSearchHit,
   AuthUserSearchResult,
   ChangeRequestDetail,
+  UserCreationTemplateView,
 } from "@acam-ts/contracts";
 
 import { useAccountChangeEditor } from "../../composables/useAccountChangeEditor";
@@ -43,6 +44,9 @@ const requestDetails = reactive({
 const submitting = ref(false);
 const approverQuery = ref("");
 const selectedApprover = ref<AuthUserSearchHit | null>(null);
+const userTemplates = ref<UserCreationTemplateView[]>([]);
+const userTemplatesLoading = ref(false);
+const userTemplatesError = ref<string | null>(null);
 
 const userCreate = useUserCreateForm({
   user,
@@ -78,6 +82,25 @@ const approverSearch = useDirectoryTypeahead<AuthUserSearchHit>(
   },
 );
 
+async function loadUserTemplates() {
+  userTemplatesLoading.value = true;
+  userTemplatesError.value = null;
+
+  try {
+    userTemplates.value = await useApi<UserCreationTemplateView[]>(
+      "/user-creation-templates",
+    );
+  } catch (caught) {
+    userTemplates.value = [];
+    userTemplatesError.value = toErrorMessage(
+      caught,
+      "Failed to load user creation templates.",
+    );
+  } finally {
+    userTemplatesLoading.value = false;
+  }
+}
+
 watch(approverQuery, (query) => {
   if (
     selectedApprover.value &&
@@ -104,6 +127,10 @@ function handleApproverSelect(username: string) {
   approverSearch.error = null;
   requestDetails.approverUsername = approver.username;
 }
+
+onMounted(() => {
+  void loadUserTemplates();
+});
 
 function buildPayload() {
   switch (requestDetails.kind) {
@@ -182,6 +209,9 @@ async function submit() {
         :controller="userCreate"
         :default-upn-suffix="defaultUpnSuffix"
         :default-mail-domain="defaultMailDomain"
+        :templates="userTemplates"
+        :templates-loading="userTemplatesLoading"
+        :templates-error="userTemplatesError"
       />
 
       <AccountChangeSection
@@ -189,10 +219,7 @@ async function submit() {
         :editor="accountChangeEditor"
       />
 
-      <GroupChangeSection
-        v-else
-        :editor="groupChangeEditor"
-      />
+      <GroupChangeSection v-else :editor="groupChangeEditor" />
 
       <div class="flex flex-wrap gap-3">
         <UButton icon="i-lucide-send" :loading="submitting" @click="submit">

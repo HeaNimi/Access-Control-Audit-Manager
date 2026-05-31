@@ -49,6 +49,12 @@ export const navigationItems: NavigationItem[] = [
         caption: "Application",
         allowedRoles: ["administrator"],
       },
+      {
+        to: "/settings/user-templates",
+        label: "User templates",
+        caption: "Creation",
+        allowedRoles: ["administrator"],
+      },
     ],
   },
 ];

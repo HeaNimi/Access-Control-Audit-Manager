@@ -3,6 +3,7 @@ import type {
   AuthenticatedUserProfile,
   DirectoryGroupSearchResult,
   DirectoryGroupView,
+  UserCreationTemplateView,
   UserCreatePayload,
 } from "@acam-ts/contracts";
 
@@ -20,6 +21,7 @@ import {
   normalizeDateTimeInput,
   normalizeFieldValue,
   sortDirectoryGroups,
+  toDateTimeLocalValue,
 } from "../utils/request-create";
 
 export type UserCreateDefaultsState = {
@@ -59,6 +61,15 @@ export function useUserCreateForm(input: {
     mail: false,
     description: false,
   });
+  const selectedTemplate = ref<UserCreationTemplateView | null>(null);
+  const upnSuffixOverride = ref("");
+  const mailDomainOverride = ref("");
+  const effectiveUpnSuffix = computed(
+    () => upnSuffixOverride.value || input.defaultUpnSuffix.value,
+  );
+  const effectiveMailDomain = computed(
+    () => mailDomainOverride.value || input.defaultMailDomain.value,
+  );
 
   const form = reactive<UserCreateFormState>({
     samAccountName: "",
@@ -97,7 +108,8 @@ export function useUserCreateForm(input: {
   const groupOptions = computed<TypeaheadOption[]>(() =>
     groupSearch.results.map((group) => ({
       id: groupKey(group),
-      title: group.displayName || group.samAccountName || group.distinguishedName,
+      title:
+        group.displayName || group.samAccountName || group.distinguishedName,
       subtitle: group.samAccountName,
       meta: group.distinguishedName,
     })),
@@ -111,20 +123,27 @@ export function useUserCreateForm(input: {
       }
 
       if (!defaults.displayName) {
-        form.displayName = [givenName, surname].filter(Boolean).join(" ").trim();
+        form.displayName = [givenName, surname]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
       }
     },
     { immediate: true },
   );
 
   watch(
-    () => form.samAccountName,
-    (samAccountName) => {
+    () => [
+      form.samAccountName,
+      effectiveUpnSuffix.value,
+      effectiveMailDomain.value,
+    ],
+    ([samAccountName, upnSuffix, mailDomain]) => {
       const suggestedPrincipal = samAccountName
-        ? `${samAccountName}@${input.defaultUpnSuffix.value}`
+        ? `${samAccountName}@${upnSuffix}`
         : "";
       const suggestedMail = samAccountName
-        ? `${samAccountName}@${input.defaultMailDomain.value}`
+        ? `${samAccountName}@${mailDomain}`
         : "";
 
       if (!defaults.userPrincipalName) {
@@ -166,6 +185,41 @@ export function useUserCreateForm(input: {
     form.password = generateSimplePassword();
   }
 
+  function applyTemplate(template: UserCreationTemplateView | null) {
+    selectedTemplate.value = template;
+    upnSuffixOverride.value = template?.upnSuffix ?? "";
+    mailDomainOverride.value = template?.mailDomain ?? "";
+    form.ouDistinguishedName =
+      template?.ouDistinguishedName ?? input.defaultUsersOuDn.value;
+    form.enabled = template?.enabledDefault ?? true;
+    form.accountExpiresAt = template?.accountExpiresOffsetDays
+      ? toDateTimeLocalValue(
+          new Date(
+            Date.now() +
+              template.accountExpiresOffsetDays * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        )
+      : "";
+    form.description =
+      template?.descriptionTemplate ??
+      buildPendingCreationDescription(
+        input.user.value,
+        createdDescriptionTimestamp,
+      );
+    form.initialGroups = sortDirectoryGroups(
+      (template?.groups ?? []).map(cloneGroup),
+    );
+
+    if (form.samAccountName) {
+      form.userPrincipalName = `${form.samAccountName}@${effectiveUpnSuffix.value}`;
+      form.mail = `${form.samAccountName}@${effectiveMailDomain.value}`;
+    }
+
+    defaults.userPrincipalName = false;
+    defaults.mail = false;
+    defaults.description = false;
+  }
+
   function isInitialGroup(group: DirectoryGroupView) {
     return form.initialGroups.some((entry) => groupsMatch(entry, group));
   }
@@ -182,7 +236,9 @@ export function useUserCreateForm(input: {
   }
 
   function handleGroupSelect(groupId: string) {
-    const group = groupSearch.results.find((entry) => groupKey(entry) === groupId);
+    const group = groupSearch.results.find(
+      (entry) => groupKey(entry) === groupId,
+    );
 
     if (!group) {
       return;
@@ -207,6 +263,13 @@ export function useUserCreateForm(input: {
   function buildPayload(): UserCreatePayload {
     return {
       kind: "user_create",
+      template: selectedTemplate.value
+        ? {
+            templateId: selectedTemplate.value.templateId,
+            templateName: selectedTemplate.value.templateName,
+            templateVersion: selectedTemplate.value.templateVersion,
+          }
+        : undefined,
       target: {
         samAccountName: form.samAccountName,
         displayName: form.displayName,
@@ -231,7 +294,9 @@ export function useUserCreateForm(input: {
     groupQuery,
     groupSearch,
     groupOptions,
+    selectedTemplate,
     markDefaultAsManual,
+    applyTemplate,
     regeneratePassword,
     handleGroupSelect,
     removeInitialGroup,

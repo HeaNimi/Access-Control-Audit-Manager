@@ -1,10 +1,16 @@
 <script setup lang="ts">
+import type { UserCreationTemplateView } from "@acam-ts/contracts";
+
 import type { UserCreateFormController } from "../composables/useUserCreateForm";
+import type { SelectOption } from "../types/ui";
 
 const props = defineProps<{
   controller: UserCreateFormController;
   defaultUpnSuffix: string;
   defaultMailDomain: string;
+  templates: UserCreationTemplateView[];
+  templatesLoading: boolean;
+  templatesError: string | null;
 }>();
 
 const groupQuery = computed({
@@ -15,6 +21,21 @@ const groupQuery = computed({
 });
 
 const groupOptions = computed(() => props.controller.groupOptions.value);
+const templateItems = computed<SelectOption<string>[]>(() => [
+  { label: "No template", value: "" },
+  ...props.templates.map((template) => ({
+    label: template.templateName,
+    value: template.templateId,
+  })),
+]);
+const selectedTemplateId = computed({
+  get: () => props.controller.selectedTemplate.value?.templateId ?? "",
+  set: (templateId: string) => {
+    const template =
+      props.templates.find((entry) => entry.templateId === templateId) ?? null;
+    props.controller.applyTemplate(template);
+  },
+});
 </script>
 
 <template>
@@ -24,6 +45,32 @@ const groupOptions = computed(() => props.controller.groupOptions.value);
     variant="subtle"
   >
     <div class="space-y-6">
+      <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+        <UFormField
+          label="Creation template"
+          size="lg"
+          :error="props.templatesError ?? undefined"
+        >
+          <USelect
+            v-model="selectedTemplateId"
+            :items="templateItems"
+            value-key="value"
+            label-key="label"
+            class="w-full"
+            :loading="props.templatesLoading"
+          />
+        </UFormField>
+        <UButton
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-rotate-ccw"
+          class="self-end"
+          @click="props.controller.applyTemplate(null)"
+        >
+          Clear template
+        </UButton>
+      </div>
+
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <UFormField label="Given name" size="lg">
           <UInput v-model="props.controller.form.givenName" class="w-full" />

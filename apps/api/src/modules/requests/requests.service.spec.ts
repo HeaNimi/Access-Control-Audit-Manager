@@ -98,7 +98,8 @@ describe('RequestsService object visibility', () => {
       justification: 'Business change',
       requesterDisplayName: requester.displayName,
       approverDisplayName: approver.displayName,
-      targetSummary: 'Test User 1 (testuser1) · 1 attribute change(s), 0 group change(s)',
+      targetSummary:
+        'Test User 1 (testuser1) · 1 attribute change(s), 0 group change(s)',
       correlationState: 'pending',
       submittedAt: '2026-04-15T09:00:00.000Z',
       approvedAt: null,
@@ -183,6 +184,9 @@ describe('RequestsService object visibility', () => {
       warning: jest.fn(),
       captureException: jest.fn(),
     };
+    const userCreationTemplatesService = {
+      resolveActiveReference: jest.fn(),
+    };
 
     const service = new RequestsService(
       db as never,
@@ -192,6 +196,7 @@ describe('RequestsService object visibility', () => {
       correlationService as never,
       readModelService as never,
       appLogService as never,
+      userCreationTemplatesService as never,
     );
 
     return {
@@ -207,6 +212,7 @@ describe('RequestsService object visibility', () => {
       correlationService,
       readModelService,
       appLogService,
+      userCreationTemplatesService,
     };
   }
 
@@ -250,9 +256,9 @@ describe('RequestsService object visibility', () => {
 
     changeRequestQuery.executeTakeFirst.mockResolvedValue(undefined);
 
-    await expect(service.getDetail('request-1', requester)).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.getDetail('request-1', requester),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('returns not found for invisible request timeline', async () => {
@@ -285,7 +291,9 @@ describe('RequestsService object visibility', () => {
     jest
       .spyOn(internals, 'persistApprovalDecision')
       .mockResolvedValue(undefined);
-    jest.spyOn(internals, 'executeApprovedRequest').mockResolvedValue(undefined);
+    jest
+      .spyOn(internals, 'executeApprovedRequest')
+      .mockResolvedValue(undefined);
     jest.spyOn(service, 'getDetail').mockResolvedValue(detail);
 
     const result = await service.decide(
@@ -328,7 +336,9 @@ describe('RequestsService object visibility', () => {
       created_at: new Date('2026-04-15T09:06:00.000Z'),
       updated_at: new Date('2026-04-15T09:07:00.000Z'),
     });
-    jest.spyOn(internals, 'executeApprovedRequest').mockResolvedValue(undefined);
+    jest
+      .spyOn(internals, 'executeApprovedRequest')
+      .mockResolvedValue(undefined);
     jest.spyOn(service, 'getDetail').mockResolvedValue(detail);
 
     const result = await service.retryExecution('request-1', administrator);
@@ -340,11 +350,7 @@ describe('RequestsService object visibility', () => {
   it('writes execution audit timestamps and LDAP result details', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(Date.parse('2026-04-15T09:10:00.000Z'));
-    const {
-      service,
-      auditService,
-      correlationService,
-    } = createService();
+    const { service, auditService, correlationService } = createService();
     const internals = service as never;
     const request = createRequestRow({
       status: 'approved',
@@ -381,8 +387,11 @@ describe('RequestsService object visibility', () => {
       });
 
     try {
-      await (service as unknown as { executeApprovedRequest: (id: string) => Promise<void> })
-        .executeApprovedRequest('request-1');
+      await (
+        service as unknown as {
+          executeApprovedRequest: (id: string) => Promise<void>;
+        }
+      ).executeApprovedRequest('request-1');
     } finally {
       jest.useRealTimers();
     }
@@ -425,7 +434,9 @@ describe('RequestsService object visibility', () => {
         },
       }),
     );
-    expect(correlationService.correlateRequest).toHaveBeenCalledWith('request-1');
+    expect(correlationService.correlateRequest).toHaveBeenCalledWith(
+      'request-1',
+    );
   });
 
   it('returns created request detail using the requesters visibility context', async () => {
@@ -463,5 +474,94 @@ describe('RequestsService object visibility', () => {
 
     expect(result).toEqual(detail);
     expect(service.getDetail).toHaveBeenCalledWith('request-1', requester);
+  });
+
+  it('canonicalizes user creation template references on request submission', async () => {
+    const {
+      service,
+      authService,
+      auditService,
+      transactionChangeRequestQuery,
+      transactionApprovalQuery,
+      transactionUpdateQuery,
+      userCreationTemplatesService,
+    } = createService();
+    const templateReference = {
+      templateId: 'template-1',
+      templateName: 'Developer',
+      templateVersion: 3,
+    };
+    const userCreatePayload: ChangeRequestPayload = {
+      kind: 'user_create',
+      template: {
+        templateId: 'template-1',
+        templateName: 'stale browser name',
+        templateVersion: 1,
+      },
+      target: {
+        samAccountName: 'new.user',
+        displayName: 'New User',
+        givenName: 'New',
+        surname: 'User',
+        enabled: true,
+      },
+      initialGroups: [],
+    };
+    const detail = {
+      ...createDetail(),
+      requestType: 'user_create',
+      payload: {
+        ...userCreatePayload,
+        template: templateReference,
+      },
+    } as ChangeRequestDetail;
+
+    authService.resolveApproverByUsername.mockResolvedValue({
+      userId: approver.userId,
+      username: approver.username,
+      displayName: approver.displayName,
+      roles: approver.roles,
+    });
+    userCreationTemplatesService.resolveActiveReference.mockResolvedValue(
+      templateReference,
+    );
+    transactionChangeRequestQuery.executeTakeFirstOrThrow.mockResolvedValue(
+      createRequestRow({
+        request_type: 'user_create',
+        request_data: userCreatePayload as unknown as Record<string, unknown>,
+      }),
+    );
+    transactionApprovalQuery.execute.mockResolvedValue(undefined);
+    transactionUpdateQuery.execute.mockResolvedValue(undefined);
+    jest.spyOn(service, 'getDetail').mockResolvedValue(detail);
+
+    await service.create(
+      {
+        title: 'Create developer',
+        justification: 'New starter',
+        approverUsername: approver.username,
+        payload: userCreatePayload,
+      },
+      requester,
+    );
+
+    expect(
+      userCreationTemplatesService.resolveActiveReference,
+    ).toHaveBeenCalledWith('template-1');
+    expect(transactionChangeRequestQuery.values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request_data: expect.objectContaining({
+          template: templateReference,
+        }),
+      }),
+    );
+    expect(auditService.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'request_submitted',
+        eventDetails: expect.objectContaining({
+          template: templateReference,
+        }),
+      }),
+    );
   });
 });

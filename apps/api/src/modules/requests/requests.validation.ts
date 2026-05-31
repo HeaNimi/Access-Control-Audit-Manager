@@ -14,6 +14,7 @@ import type {
   GroupMemberChange,
   GroupMembershipPayload,
   UserCreatePayload,
+  UserCreationTemplateReference,
 } from '@acam-ts/contracts';
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -43,6 +44,28 @@ function asDirectoryObjectRef(
       typeof value.objectSid === 'string' ? value.objectSid : undefined,
     displayName:
       typeof value.displayName === 'string' ? value.displayName : undefined,
+  };
+}
+
+function asUserCreationTemplateReference(
+  value: unknown,
+): UserCreationTemplateReference | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!isObject(value) || typeof value.templateId !== 'string') {
+    throw new Error('user_create.template requires templateId.');
+  }
+
+  return {
+    templateId: value.templateId,
+    templateName:
+      typeof value.templateName === 'string' ? value.templateName : undefined,
+    templateVersion:
+      typeof value.templateVersion === 'number'
+        ? value.templateVersion
+        : undefined,
   };
 }
 
@@ -333,6 +356,7 @@ export function parseChangeRequestPayload(
       const source = payload.target as Record<string, unknown>;
       const parsed: UserCreatePayload = {
         kind: 'user_create',
+        template: asUserCreationTemplateReference(payload.template),
         target: {
           ...target,
           samAccountName: target.samAccountName,
